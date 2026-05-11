@@ -13,6 +13,10 @@
 /* Begin PBXFileReference section */
 		B4FD0DE82FA1722A00272AE1 /* TSOClient.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = TSOClient.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		B4FD0DF72FA172C400272AE1 /* WebKit.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = WebKit.framework; path = System/Library/Frameworks/WebKit.framework; sourceTree = SDKROOT; };
+		B4FD0DFA2FA172C400272AE1 /* CLAUDE.md */ = {isa = PBXFileReference; lastKnownFileType = net.daringfireball.markdown; name = CLAUDE.md; path = ../CLAUDE.md; sourceTree = SOURCE_ROOT; };
+		B4FD0DFB2FA172C400272AE1 /* README.md */ = {isa = PBXFileReference; lastKnownFileType = net.daringfireball.markdown; name = README.md; path = ../README.md; sourceTree = SOURCE_ROOT; };
+		B4FD0DFC2FA172C400272AE1 /* log.md */ = {isa = PBXFileReference; lastKnownFileType = net.daringfireball.markdown; name = log.md; path = ../log.md; sourceTree = SOURCE_ROOT; };
+		B4FD0DFD2FA172C400272AE1 /* specialist-dispatch.md */ = {isa = PBXFileReference; lastKnownFileType = net.daringfireball.markdown; name = "specialist-dispatch.md"; path = "../specialist-dispatch.md"; sourceTree = SOURCE_ROOT; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedBuildFileExceptionSet section */
@@ -52,6 +56,7 @@
 			isa = PBXGroup;
 			children = (
 				B4FD0DEA2FA1722A00272AE1 /* TSOClient */,
+				B4FD0DF92FA172C400272AE1 /* Documentation */,
 				B4FD0DF62FA172C400272AE1 /* Frameworks */,
 				B4FD0DE92FA1722A00272AE1 /* Products */,
 			);
@@ -71,6 +76,17 @@
 				B4FD0DF72FA172C400272AE1 /* WebKit.framework */,
 			);
 			name = Frameworks;
+			sourceTree = "<group>";
+		};
+		B4FD0DF92FA172C400272AE1 /* Documentation */ = {
+			isa = PBXGroup;
+			children = (
+				B4FD0DFA2FA172C400272AE1 /* CLAUDE.md */,
+				B4FD0DFB2FA172C400272AE1 /* README.md */,
+				B4FD0DFC2FA172C400272AE1 /* log.md */,
+				B4FD0DFD2FA172C400272AE1 /* specialist-dispatch.md */,
+			);
+			name = Documentation;
 			sourceTree = "<group>";
 		};
 /* End PBXGroup section */

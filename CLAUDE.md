@@ -2,15 +2,14 @@
 
 ## What this project is
 
-A native macOS wrapper around The Settlers Online (TSO), built as an automation and enhancement platform. The game runs inside a `WKWebView`. The current TSO client is a **Unity WebGL** build (the original Flash client was retired with Flash itself; a brief HTML5 era preceded Unity). The backend protocol is unchanged — GameServer responses are still AMF3/Flex over `fetch`, which is why the AMF3 scanner keeps working. Behaviour is extended through injected JavaScript that intercepts those network responses, draws an HTML overlay above the Unity canvas, and manipulates the surrounding DOM site chrome. Swift owns the native chrome, data models, and image processing; JavaScript owns in-page logic and the visual overlay.
+A native macOS wrapper around The Settlers Online (TSO), built as an automation and enhancement platform. The game runs inside a `WKWebView`. The current TSO client is a **Unity WebGL** build (the original Flash client was retired with Flash itself; a brief HTML5 era preceded Unity). The backend protocol is unchanged — GameServer responses are still AMF3/Flex over `fetch`, which is why the AMF3 scanner keeps working. Behaviour is extended through injected JavaScript that intercepts network responses and substitutes textures to highlight collectibles. Swift owns the native chrome, data models, and image processing; JavaScript owns in-page interception and texture patching.
 
 **Unity-client implications** (do not relearn each session):
 - The game canvas is a single WebGL2 context; there is no JS-accessible game state (`window.s_oIsland` / `s_oMain` / `s_oGame` etc. **do not exist**). Camera position lives inside the wasm heap.
-- Sprites are uploaded to GL textures from a binary atlas, not fetched as individual `<img>` URLs. The `tso-asset://` URL rewriter and `HighlightSchemeHandler` therefore see ~zero matches against game art and are effectively dormant; they're retained only because they're cheap and may still catch DOM-based site UI imagery.
-- `gameevents.registerHook` exposes only coarse lifecycle triggers (`triggerLevelUp`, `triggerTutorialEnd`, `triggerFriendInvite`, `triggerClientLoaded`); not useful for camera tracking.
-- Camera tracking for the overlay must come from JS-observable user input (pointer drag on the canvas, wheel, keyboard) or from hooking the WebGL view-projection matrix at `uniformMatrix4fv` — not from reading game globals.
+- Building textures **are** fetched individually via `fetch()` from Ubisoft's CDN (`ubistatic-a.akamaihd.net/frontend/GFX_HASHED/building_lib/<sha1>.png`). This is how the collectible texture patcher works: it intercepts those fetches and returns a synthetic pink PNG for known collectible hashes. `<img>` elements are not used for game art, so the `tso-asset://` URL rewriter is dormant.
+- `gameevents.registerHook` exposes only coarse lifecycle triggers (`triggerLevelUp`, `triggerTutorialEnd`, `triggerFriendInvite`, `triggerClientLoaded`); not useful for game-state reading.
 
-The long-term goal is a full automation suite: collectible highlighting, explorer dispatch, buffing, adventure management. The current milestone is the **Collectible Highlighter**.
+The long-term goal is a full automation suite: collectible highlighting, explorer/specialist dispatch, buffing, adventure management. The **Collectible Highlighter** shipped (via texture substitution). The current milestone is **Specialist Dispatch**.
 
 **What a collectible is:** a resource item (herbs, banner, food cart, etc.) that spawns at a random map tile on the player's island and is picked up by clicking. *Not* a building, and *not* the per-building "ready to collect" stockpile (`dPersistedPickupItemVO`, e.g. "879 TitaniumOre at the Titanium Mine"). The feature mirrors what the **Pinky** Chrome extension and the Windows AIR client (`fedorovvl/tso_client`) do for the same game.
 
@@ -24,7 +23,7 @@ TSOClient/                  ← Xcode project root
   TSOClient.xcodeproj/
   TSOClient/                ← source root (all Swift + assets)
     TSOClientApp.swift      ← @main, window sizing (1280×900)
-    ContentView.swift       ← WebView NSViewRepresentable + 4 injected JS modules
+    ContentView.swift       ← WebView NSViewRepresentable + 3 active JS modules (jsOverlay + jsURLRewriter retained as commented-out dead code)
     BridgeProtocol.swift    ← InboundMessage / OutboundMessage Swift types
     CollectiblesStore.swift ← @Observable data model for parsed collectibles
     CollectiblesHighlighter.swift ← WKURLSchemeHandler: tso-asset:// → CDN fetch + glow
@@ -34,41 +33,37 @@ TSOClient/                  ← Xcode project root
 
 ## Architecture in one paragraph
 
-`WebView` loads `thesettlersonline.com`. Four JS modules are injected at `atDocumentStart` in dependency order: **jsBridge** (sets up `window.TSOBridge` for Swift→JS and `window._tsoSend` for JS→Swift), **jsOverlay** (transparent fixed `<canvas>` at `z-index:1000` so DOM popups stay above it, isometric marker renderer, calibration engine, `requestAnimationFrame` camera-reader loop), **jsAMF3Scanner** (wraps `window.fetch`, deserialises GameServer AMF3 binary responses, walks the object tree to locate spawned-collectible VOs and the zone's `mapWidth`/`mapHeight`), **jsURLRewriter** (rewrites collectible `<img>` src to `tso-asset://` for the Swift glow handler — dormant under the Unity client; see implications above). JS→Swift uses two named `WKScriptMessageHandler` channels: `"logger"` (raw strings) and `"tso"` (structured `{type, payload}` JSON). Swift→JS goes through `webView.evaluateJavaScript("window.TSOBridge.receive({…})")`. `CollectiblesStore` is `@Observable`; the `Coordinator` mutates it on main thread when `COLLECTIBLES` messages arrive.
+`WebView` loads `thesettlersonline.com`. Three JS modules are injected at `atDocumentStart` in dependency order: **jsBridge** (sets up `window.TSOBridge` for Swift→JS and `window._tsoSend` for JS→Swift), **jsAMF3Scanner** (wraps `window.fetch` and `XMLHttpRequest`, deserialises GameServer AMF3 binary responses, walks the object tree to locate spawned-collectible VOs and the zone's `mapWidth`/`mapHeight`), **jsCollectiblePatcher** (wraps `fetch` + `XHR` on the request side; for 55 known collectible building-texture hashes returns a 32×32 hot-pink synthetic PNG so Unity renders those buildings pink in-world). Two additional modules — **jsOverlay** (canvas overlay with isometric marker renderer) and **jsURLRewriter** — are retained in source but commented out of the injection list; the overlay approach was abandoned in favour of texture substitution. JS→Swift uses two named `WKScriptMessageHandler` channels: `"logger"` (raw strings) and `"tso"` (structured `{type, payload}` JSON). Swift→JS goes through `webView.evaluateJavaScript("window.TSOBridge.receive({…})")`. `CollectiblesStore` is `@Observable`; the `Coordinator` mutates it on main thread when `COLLECTIBLES` messages arrive.
 
 ## Bridge protocol
 
 **JS → Swift (`"tso"` handler):**
 - `COLLECTIBLES` — `{mapWidth, mapHeight, items:[{gridIndex,x,y,assetName}]}`
 - `GAME_STATE`   — `{state:"LOADED"|"ZONE_CHANGED"|"ZONE_LEFT", zoneId?}`
-- `CALIBRATION_DONE` — `{tileHW, tileHH, originX, originY}`
+- `CALIBRATION_DONE` — *(legacy — overlay disabled; never fired)*
 
 **Swift → JS (`OutboundMessage.send(to:)`):**
-- `SET_OVERLAY`       — `{enabled: bool}`
-- `SET_OVERLAY_COLOR` — `{color: "#rrggbb"}`
-- `CALIBRATE`         — `{gx1,gy1,sx1,sy1,gx2,gy2,sx2,sy2}`
-- `RENDER`            — (no payload, force redraw)
+- `SET_OVERLAY`, `SET_OVERLAY_COLOR`, `CALIBRATE`, `RENDER` — *(all legacy — overlay disabled; code retained but never called)*
 
-## Overlay coordinate system
+## Highlighting approach (replaced overlay)
 
-Standard isometric formula:
-```
-screenX = (gridX - gridY) * tileHW + originX
-screenY = (gridX + gridY) * tileHH + originY
-```
-Defaults: `tileHW=32, tileHH=16` (64×32 px tiles). Two-point calibration via `window._TSOOverlay.calibrate(gx1,gy1,sx1,sy1,gx2,gy2,sx2,sy2)`; calibration is stored in **world-space** so it survives camera pans. Camera pan was originally tracked via `MutationObserver` on the game canvas's CSS transform — that approach was abandoned in Iteration 7 because Unity pans the camera inside its wasm heap, not via DOM/CSS. Current binding: a `requestAnimationFrame` loop in `jsOverlay` calls the first non-null candidate in `buildCandidates()` each frame; under the Unity client the legacy `s_oIsland` / `s_oMain` / `s_oGame` / `s_oScene` accessors all return null, so the rendered camera offset stays at zero until a Unity-aware reader (input-tracking or WebGL matrix hook) is added.
+Collectibles are highlighted by **texture substitution**: `jsCollectiblePatcher` intercepts `fetch()` and `XMLHttpRequest` calls for collectible building PNG textures (matched by SHA-1 hash against a 55-entry list from Pinky's `live.json`) and returns a synthetic 32×32 hot-pink image instead. Unity uploads the substituted bytes as a GL texture and renders the collectible pink in-world. No overlay canvas, no calibration, no camera tracking is needed.
+
+The `jsOverlay` canvas approach (isometric formula, two-point calibration, `requestAnimationFrame` camera reader) was abandoned in Iteration 7 because Unity renders via its wasm heap — no JS-accessible camera globals exist — and calibration was fragile. The module remains in `ContentView.swift` as dead code for reference.
+
+`HighlightSchemeHandler` is still registered for the `tso-asset://` scheme but never triggered: nothing generates `tso-asset://` URLs under the current architecture. It can be removed without impact.
 
 ## Key invariants
 
 - `updateNSView` guards `webView.url == nil` — do not remove this or the game reloads on every SwiftUI state change.
-- JS modules are injected in order; `jsBridge` must be first because the others call `window._tsoSend`.
+- Injection order: `jsBridge` first (others call `window._tsoSend`), then `jsAMF3Scanner`, then `jsCollectiblePatcher`. The patcher must run **after** the scanner because it wraps the scanner's already-patched `window.fetch`; reversing the order breaks AMF3 parsing on non-collectible URLs.
 - `WKUserContentController.add(_:name:)` retains the handler — the `Coordinator` is already `NSObject`, no extra wrapper needed.
-- `HighlightSchemeHandler` registered for scheme `"tso-asset"`. The scheme handler and the URL rewriter are independent layers; both can coexist. Both are dormant under the Unity client (sprites come from a GL atlas, not URL fetches) but cheap to keep injected.
+- `HighlightSchemeHandler` is still registered for `"tso-asset"` but never invoked. Safe to ignore.
 - `@Observable` (Swift 5.9 macro, not `ObservableObject`). Use `@State` at the owner site, pass by value to child views — the class reference propagates automatically.
 
 ## Xcode practices (token efficiency)
 
-- **Read changed files only.** The project is small; `ContentView.swift` holds all four JS modules as Swift string literals — read it whole rather than grepping for fragments.
+- **Read changed files only.** The project is small; `ContentView.swift` holds all five JS modules (three injected, two dead code) as Swift string literals — read it whole rather than grepping for fragments.
 - **Build via CLI** to get structured errors without opening Xcode:
   ```
   xcodebuild -project TSOClient/TSOClient.xcodeproj \
@@ -88,8 +83,9 @@ Defaults: `tileHW=32, tileHH=16` (64×32 px tiles). Two-point calibration via `w
 
 ## What does NOT exist yet
 
-- Any SwiftUI controls (the window is currently 100% WebView).
-- Persistent calibration storage (calibration is lost on restart).
-- A working camera reader for the Unity client (overlay markers don't track pan yet).
-- Explorer dispatch, buff management, adventure features.
+- Specialist/explorer dispatch (the next milestone — see `explorer-feature.md` for the plan).
+- Any SwiftUI chrome — the window is currently 100% WebView with no native controls.
+- Outbound AMF3 capability — the scanner parses incoming responses but never sends to GameServer.
+- Persistent storage of dispatch templates or any app settings.
+- Buff management, adventure features, trading, building automation.
 - Unit or UI tests.

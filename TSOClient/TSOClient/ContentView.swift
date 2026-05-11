@@ -6,6 +6,7 @@ import WebKit
 struct WebView: NSViewRepresentable {
     let url: URL
     var store: CollectiblesStore
+    var specialistsStore: SpecialistsStore
 
     func makeNSView(context: Context) -> WKWebView {
         let config = WKWebViewConfiguration()
@@ -14,14 +15,15 @@ struct WebView: NSViewRepresentable {
 
         let controller = config.userContentController
 
-        // JS execution order matters: bridge first, then scanner, then patcher.
-        // jsOverlay and jsURLRewriter are disabled — collectible highlighting is now
-        // done by jsCollectiblePatcher (texture substitution via fetch interception),
-        // which requires no overlay canvas or calibration.
+        // Injection order: bridge → scanner (inbound AMF + outbound capture) →
+        // encoder (_TSORPC send primitive) → patcher (texture substitution).
+        // jsOverlay and jsURLRewriter are disabled — collectible highlighting is
+        // done by jsCollectiblePatcher (texture substitution via fetch interception).
         for (source, frame) in [
             (jsBridge,              false),
             // (jsOverlay,          false),  // disabled: replaced by texture patcher
             (jsAMF3Scanner,         false),
+            (jsAMF3Encoder,         false),  // AMF3 encoder + _TSORPC send primitive
             // (jsURLRewriter,      false),  // disabled: dormant under Unity client
             (jsCollectiblePatcher,  false),
         ] as [(String, Bool)] {
@@ -45,6 +47,8 @@ struct WebView: NSViewRepresentable {
 
         webView.isInspectable = true
         context.coordinator.webView = webView
+        context.coordinator.registerNotifications()
+        NotificationCenter.default.post(name: .tsoWebViewReady, object: webView)
         return webView
     }
 
@@ -54,16 +58,33 @@ struct WebView: NSViewRepresentable {
         webView.load(URLRequest(url: url))
     }
 
-    func makeCoordinator() -> Coordinator { Coordinator(store: store) }
+    func makeCoordinator() -> Coordinator {
+        Coordinator(store: store, specialistsStore: specialistsStore)
+    }
 
     // MARK: Coordinator
 
     final class Coordinator: NSObject, WKUIDelegate, WKNavigationDelegate, WKScriptMessageHandler {
 
         var store: CollectiblesStore
+        var specialistsStore: SpecialistsStore
         weak var webView: WKWebView?
 
-        init(store: CollectiblesStore) { self.store = store }
+        init(store: CollectiblesStore, specialistsStore: SpecialistsStore) {
+            self.store = store
+            self.specialistsStore = specialistsStore
+        }
+
+        func registerNotifications() {
+            NotificationCenter.default.addObserver(
+                self, selector: #selector(handleEvaluateJS(_:)),
+                name: .tsoEvaluateJS, object: nil)
+        }
+
+        @objc private func handleEvaluateJS(_ note: Notification) {
+            guard let js = note.userInfo?["js"] as? String else { return }
+            webView?.evaluateJavaScript(js, completionHandler: nil)
+        }
 
         // Open target="_blank" links inside the same view.
         func webView(_ webView: WKWebView,
@@ -96,7 +117,6 @@ struct WebView: NSViewRepresentable {
                 return
             }
 
-            // All SwiftUI mutations on main thread.
             DispatchQueue.main.async { [weak self] in
                 guard let self else { return }
                 switch msg {
@@ -107,10 +127,14 @@ struct WebView: NSViewRepresentable {
                     print("[TSO] Game state: \(payload.state) zoneId=\(payload.zoneId.map(String.init) ?? "nil")")
                     if payload.state == "ZONE_LEFT" {
                         self.store.clear()
+                        self.specialistsStore.clear()
                         self.webView?.evaluateJavaScript(
                             "window._TSOOverlay?.setCollectibles([]);window._TSOOverlay?.resyncCamera()",
                             completionHandler: nil)
                     }
+                case .specialists(let payload):
+                    self.specialistsStore.apply(payload)
+                    print("[TSO] Specialists received: \(payload.items.count)")
                 case .calibrationDone(let payload):
                     print("[TSO] Calibration: tileHW=\(payload.tileHW) tileHH=\(payload.tileHH) origin=(\(payload.originX),\(payload.originY))")
                 }
@@ -123,12 +147,40 @@ struct WebView: NSViewRepresentable {
 
 struct ContentView: View {
     @State private var store = CollectiblesStore()
+    @State private var specialistsStore = SpecialistsStore()
+    @State private var webViewRef: WKWebView? = nil
 
     var body: some View {
-        WebView(url: URL(string: "https://www.thesettlersonline.com/en/homepage")!,
-                store: store)
-            .frame(minWidth: 1024, minHeight: 768)
+        HSplitView {
+            WebView(url: URL(string: "https://www.thesettlersonline.com/en/homepage")!,
+                    store: store,
+                    specialistsStore: specialistsStore)
+                .frame(minWidth: 800, minHeight: 768)
+
+            SpecialistsPanel(store: specialistsStore) { uid1, uid2, subTaskID, targetGrid in
+                let js = """
+                window._TSORPC?.dispatchSpecialist({
+                    uid1:\(uid1),uid2:\(uid2),
+                    taskCode:\(subTaskID),targetGrid:\(targetGrid)
+                })
+                """
+                // Evaluate in the webView held by the coordinator.
+                // We access it through a notification since WebView is NSViewRepresentable.
+                NotificationCenter.default.post(
+                    name: .tsoEvaluateJS, object: nil,
+                    userInfo: ["js": js])
+            }
+        }
+        .frame(minWidth: 1100, minHeight: 768)
+        .onReceive(NotificationCenter.default.publisher(for: .tsoWebViewReady)) { note in
+            webViewRef = note.object as? WKWebView
+        }
     }
+}
+
+extension Notification.Name {
+    static let tsoEvaluateJS  = Notification.Name("tsoEvaluateJS")
+    static let tsoWebViewReady = Notification.Name("tsoWebViewReady")
 }
 
 // MARK: - Injected JavaScript modules
@@ -1136,6 +1188,7 @@ private let jsAMF3Scanner = #"""
             if (!ctx.exemplars[v.__class]) ctx.exemplars[v.__class] = v;
             if (v.__class.split('.').pop() === 'dBuildingVO') ctx.allBuildings.push(v);
             if (v.__class.split('.').pop() === 'DestructBuildingResultVO') ctx.destructed.push(v);
+            if (v.__class.split('.').pop() === 'dSpecialistVO') ctx.specialists.push(v);
             if (isCollectibleBuilding(v)) {
                 ctx.items.push(v);
                 ctx.itemParents.push(parent);
@@ -1181,6 +1234,7 @@ private let jsAMF3Scanner = #"""
             idToGrid:     {},    // "uniqueID1:uniqueID2" → { gi, cls }
             allBuildings: [],    // every dBuildingVO, for calibration data export
             destructed:   [],    // DestructBuildingResultVO instances (pickup events)
+            specialists:  [],    // dSpecialistVO instances
         };
     }
 
@@ -1432,6 +1486,40 @@ private let jsAMF3Scanner = #"""
         });
         // setCollectibles already called above; don't call again here
 
+        // ── Specialist extraction ─────────────────────────────────────────
+        if (ctx.specialists.length > 0) {
+            var specItems = [];
+            for (var si = 0; si < ctx.specialists.length; si++) {
+                var sp = ctx.specialists[si];
+                var uid = uidObj(sp);
+                var uk  = uidKey(uid);
+                if (!uk) continue;
+                var parts = uk.split(':');
+                var u1 = parseInt(parts[0], 10);
+                var u2 = parseInt(parts[1], 10);
+                // taskEndTime: look for common field names; may be Date or numeric ms
+                var endTime = null;
+                var tet = sp.taskEndTime || sp.finishTime || sp.endTime || sp.taskFinishTime;
+                if (tet instanceof Date) endTime = tet.getTime();
+                else if (typeof tet === 'number' && tet > 0) endTime = tet;
+                specItems.push({
+                    uid: uk,
+                    uid1: u1,
+                    uid2: u2,
+                    specialistType: sp.specialistType || sp.type || sp.specialistTypeID || 'Unknown',
+                    name: sp.name || sp.specialistName || '',
+                    level: sp.level || sp.skillLevel || 1,
+                    isIdle: !sp.currentTask && !sp.task && endTime === null,
+                    taskEndTime: endTime,
+                });
+            }
+            if (specItems.length > 0) {
+                window._tsoSend('SPECIALISTS', { items: specItems });
+                webkit.messageHandlers.logger.postMessage(
+                    '[AMF3:' + channel + '] specialists=' + specItems.length);
+            }
+        }
+
         // ── Pickup detection → calibration anchor ─────────────────────────
         // Compare current collectible set with previous. Exactly one disappearing
         // means a pickup; more disappearing means a zone change or bulk update.
@@ -1473,6 +1561,17 @@ private let jsAMF3Scanner = #"""
             webkit.messageHandlers.logger.postMessage('[AMF3:url] ' + url.slice(0, 120));
         }
 
+        // ── Outbound body capture (Phase 1) ──────────────────────────────
+        var isPost = init && (init.method || '').toUpperCase() === 'POST';
+        if (url.includes('GameServer') && isPost && init.body) {
+            captureOutboundBody(init.body, 'fetch');
+        }
+        // Store realm URL for _TSORPC to discover automatically.
+        if (url.includes('GameServer/amf') && !window._tsoRealmUrl) {
+            window._tsoRealmUrl = url;
+            webkit.messageHandlers.logger.postMessage('[AMF3:url] realm cached: ' + url.slice(0, 100));
+        }
+
         return origFetch.apply(this, arguments).then(function(response) {
             var ct = response.headers ? (response.headers.get('content-type') || '') : '';
             var wantAMF = url.includes('GameServer') ||
@@ -1488,6 +1587,85 @@ private let jsAMF3Scanner = #"""
         });
     };
 
+    // ── Auth context caching ─────────────────────────────────────────────
+    // Walks a parsed outbound envelope to extract dsoAuthToken, DSId, zoneID, etc.
+    // Called each time a GameServer POST is observed so zoneID stays current
+    // across zone changes.
+    function cacheAuthCtx(bodies) {
+        try {
+            for (var i = 0; i < bodies.length; i++) {
+                var val = bodies[i].value;
+                if (!Array.isArray(val)) continue;
+                for (var j = 0; j < val.length; j++) {
+                    var rmsg = val[j];
+                    if (!rmsg || !rmsg.__class || rmsg.__class.indexOf('RemotingMessage') < 0) continue;
+                    var dsId = (rmsg.headers && rmsg.headers.DSId) || '';
+                    var bodyArr = rmsg.body;
+                    if (!Array.isArray(bodyArr)) continue;
+                    for (var k = 0; k < bodyArr.length; k++) {
+                        var call = bodyArr[k];
+                        if (!call || !call.__class || call.__class.indexOf('dServerCall') < 0) continue;
+                        var prev = window._tsoAuthCtx;
+                        window._tsoAuthCtx = {
+                            dsoAuthToken:          call.dsoAuthToken,
+                            dsoAuthRandomClientID: call.dsoAuthRandomClientID,
+                            dsoAuthUser:           call.dsoAuthUser,
+                            zoneID:                call.zoneID,
+                            DSId:                  dsId,
+                        };
+                        if (!prev || prev.zoneID !== call.zoneID) {
+                            webkit.messageHandlers.logger.postMessage(
+                                '[AMF3:auth] ctx updated zoneID=' + call.zoneID +
+                                ' DSId=' + dsId.slice(0, 20));
+                        }
+                        return;
+                    }
+                }
+            }
+        } catch (_) {}
+    }
+
+    // ── Outbound body capture helper ────────────────────────────────────
+    function captureOutboundBody(body, channel) {
+        function logBuf(buf) {
+            try {
+                var u8 = new Uint8Array(buf);
+                // Hex dump first 512 bytes.
+                var hex = '';
+                var limit = Math.min(u8.length, 512);
+                for (var i = 0; i < limit; i++) {
+                    hex += ('0' + u8[i].toString(16)).slice(-2);
+                    if ((i + 1) % 16 === 0) hex += '\n';
+                    else hex += ' ';
+                }
+                webkit.messageHandlers.logger.postMessage(
+                    '[AMF3:out:hex] len=' + u8.length + '\n' + hex.trim());
+                // Parse as AMF3 envelope and pretty-print the tree.
+                try {
+                    var p = new AMFParser(buf);
+                    var bodies = p.parseEnvelope();
+                    webkit.messageHandlers.logger.postMessage(
+                        '[AMF3:out] envelope target=' + (bodies[0] ? bodies[0].target : '?') +
+                        ' response=' + (bodies[0] ? bodies[0].response : '?') +
+                        ' tree=' + JSON.stringify(bodies, replacer, 2).slice(0, 2000));
+                    cacheAuthCtx(bodies);
+                } catch (pe) {
+                    webkit.messageHandlers.logger.postMessage('[AMF3:out] parse fail: ' + pe.message);
+                }
+            } catch (e) {
+                webkit.messageHandlers.logger.postMessage('[AMF3:out] capture error: ' + e);
+            }
+        }
+        function replacer(k, v) {
+            if (v instanceof Uint8Array) return '<ByteArray len=' + v.length + '>';
+            if (v instanceof ArrayBuffer) return '<ArrayBuffer len=' + v.byteLength + '>';
+            return v;
+        }
+        if (body instanceof ArrayBuffer) { logBuf(body); return; }
+        if (body instanceof Uint8Array)  { logBuf(body.buffer.slice(body.byteOffset, body.byteOffset + body.byteLength)); return; }
+        if (body instanceof Blob) { body.arrayBuffer().then(logBuf).catch(function(){}); return; }
+    }
+
     // ── XHR interception ────────────────────────────────────────────────
     // The fetch hook captured 30+ AMF responses but none carried the spawn
     // list — possible the game uses XHR for some calls. Hook open() to
@@ -1497,11 +1675,20 @@ private let jsAMF3Scanner = #"""
     var origSend = XMLHttpRequest.prototype.send;
     XMLHttpRequest.prototype.open = function(method, url) {
         this._tsoUrl = url || '';
+        this._tsoMethod = (method || '').toUpperCase();
+        // Cache realm URL from first observed GameServer request.
+        if (url && url.includes('GameServer/amf') && !window._tsoRealmUrl) {
+            window._tsoRealmUrl = url;
+        }
         return origOpen.apply(this, arguments);
     };
-    XMLHttpRequest.prototype.send = function() {
+    XMLHttpRequest.prototype.send = function(body) {
         var xhr = this;
         if (xhr._tsoUrl && xhr._tsoUrl.indexOf('GameServer') >= 0) {
+            // Capture outbound body before sending.
+            if (xhr._tsoMethod === 'POST' && body) {
+                captureOutboundBody(body, 'xhr');
+            }
             xhr.addEventListener('load', function() {
                 try {
                     var buf = null;
@@ -1522,6 +1709,9 @@ private let jsAMF3Scanner = #"""
         }
         return origSend.apply(this, arguments);
     };
+
+    // Expose AMFParser for jsAMF3Encoder's response parsing.
+    window._TSOAMFParser = AMFParser;
 })();
 """#
 
@@ -1833,5 +2023,326 @@ private let jsCollectiblePatcher = #"""
 
     webkit.messageHandlers.logger.postMessage(
         '[CollectiblePatcher] ready — ' + HASHES.size + ' hashes');
+})();
+"""#
+
+// ─────────────────────────────────────────────────────────────────────────────
+// 5. AMF3 encoder + _TSORPC send primitive.
+//    Mirrors AMFParser byte-level conventions. Round-trip equality against a
+//    Phase-1-captured SendServerAction envelope should be verified in the
+//    Web Inspector console before relying on dispatches in production.
+// ─────────────────────────────────────────────────────────────────────────────
+private let jsAMF3Encoder = #"""
+(function() {
+    'use strict';
+
+    // ── Writer constructor ────────────────────────────────────────────────
+
+    function AMFWriter() {
+        this._b   = [];      // raw bytes
+        this._str = {};      // string value → ref index (excludes empty string)
+        this._strl = [];
+        this._obj  = [];     // object identity → ref index (WeakMap-style via indexOf)
+        this._tr   = {};     // traitKey → ref index
+        this._trl  = [];
+    }
+
+    var W = AMFWriter.prototype;
+
+    W.u8    = function(v) { this._b.push(v & 0xff); };
+    W.u16be = function(v) { this.u8(v >> 8); this.u8(v); };
+    W.s32be = function(v) {
+        this.u8((v >>> 24) & 0xff);
+        this.u8((v >>> 16) & 0xff);
+        this.u8((v >>> 8)  & 0xff);
+        this.u8(v & 0xff);
+    };
+    W.f64be = function(v) {
+        var dv = new DataView(new ArrayBuffer(8));
+        dv.setFloat64(0, v, false);
+        for (var i = 0; i < 8; i++) this.u8(dv.getUint8(i));
+    };
+
+    // Variable-length 29-bit integer, big-endian 7-bit groups (MSB = continue).
+    // Mirrors AMFParser.u29 exactly.
+    W.u29 = function(v) {
+        v &= 0x1fffffff;
+        if (v < 0x80) {
+            this.u8(v);
+        } else if (v < 0x4000) {
+            this.u8(((v >> 7) & 0x7f) | 0x80);
+            this.u8(v & 0x7f);
+        } else if (v < 0x200000) {
+            this.u8(((v >> 14) & 0x7f) | 0x80);
+            this.u8(((v >> 7)  & 0x7f) | 0x80);
+            this.u8(v & 0x7f);
+        } else {
+            this.u8(((v >> 22) & 0x7f) | 0x80);
+            this.u8(((v >> 15) & 0x7f) | 0x80);
+            this.u8(((v >> 8)  & 0x7f) | 0x80);
+            this.u8(v & 0xff);
+        }
+    };
+
+    // AMF0 string (U16 length prefix — used in envelope target/response fields).
+    W.amf0Str = function(s) {
+        var enc = new TextEncoder().encode(s);
+        this.u16be(enc.length);
+        for (var i = 0; i < enc.length; i++) this.u8(enc[i]);
+    };
+
+    // AMF3 string with reference table. Empty string is always written inline (u29=1).
+    W.amf3Str = function(s) {
+        if (s === '') { this.u29(1); return; }
+        if (s in this._str) { this.u29(this._str[s] << 1); return; }
+        var enc = new TextEncoder().encode(s);
+        this.u29((enc.length << 1) | 1);
+        for (var i = 0; i < enc.length; i++) this.u8(enc[i]);
+        this._str[s] = this._strl.length;
+        this._strl.push(s);
+    };
+
+    W.amf3Val = function(v) {
+        if (v === undefined) { this.u8(0x00); return; }
+        if (v === null)      { this.u8(0x01); return; }
+        if (v === false)     { this.u8(0x02); return; }
+        if (v === true)      { this.u8(0x03); return; }
+        if (typeof v === 'number') {
+            if (Number.isInteger(v) && v >= -268435456 && v <= 268435455) {
+                this.u8(0x04);
+                this.u29(v < 0 ? (v + 0x20000000) : v);
+            } else {
+                this.u8(0x05); this.f64be(v);
+            }
+            return;
+        }
+        if (typeof v === 'string') { this.u8(0x06); this.amf3Str(v); return; }
+        if (v instanceof Date) {
+            this.u8(0x08);
+            var idx = this._obj.indexOf(v);
+            if (idx >= 0) { this.u29(idx << 1); return; }
+            this._obj.push(v);
+            this.u29(1);
+            this.f64be(v.getTime());
+            return;
+        }
+        if (v instanceof Uint8Array || v instanceof ArrayBuffer) {
+            var ba = (v instanceof ArrayBuffer) ? new Uint8Array(v) : v;
+            this.u8(0x0C);
+            var bidx = this._obj.indexOf(v);
+            if (bidx >= 0) { this.u29(bidx << 1); return; }
+            this._obj.push(v);
+            this.u29((ba.length << 1) | 1);
+            for (var i = 0; i < ba.length; i++) this.u8(ba[i]);
+            return;
+        }
+        if (Array.isArray(v)) {
+            this.u8(0x09);
+            var aidx = this._obj.indexOf(v);
+            if (aidx >= 0) { this.u29(aidx << 1); return; }
+            this._obj.push(v);
+            this.u29((v.length << 1) | 1);
+            this.amf3Str('');  // no associative keys
+            for (var i = 0; i < v.length; i++) this.amf3Val(v[i]);
+            return;
+        }
+        if (typeof v === 'object') {
+            this.u8(0x0A);
+            var oidx = this._obj.indexOf(v);
+            if (oidx >= 0) { this.u29(oidx << 1); return; }
+            this._obj.push(v);
+            var cls = v.__class || '';
+            // Externalizable: ArrayCollection / ObjectProxy.
+            var isExt = cls === 'flex.messaging.io.ArrayCollection' ||
+                        cls === 'mx.collections.ArrayCollection'    ||
+                        cls === 'flex.messaging.io.ObjectProxy'     ||
+                        cls === 'mx.utils.ObjectProxy';
+            if (isExt) {
+                // new trait: 0 members, externalizable=true, dynamic=false → u29(7)
+                this.u29(7);
+                this.amf3Str(cls);
+                this.amf3Val(v.source !== undefined ? v.source : []);
+                return;
+            }
+            var members = Object.keys(v).filter(function(k) { return k !== '__class'; });
+            var trKey = cls + '|' + members.join('\x00');
+            if (trKey in this._tr) {
+                // trait reference: (index << 2) | 1
+                this.u29((this._tr[trKey] << 2) | 1);
+            } else {
+                // new trait: (nm << 4) | 3  (ext=0, dyn=0)
+                this.u29((members.length << 4) | 3);
+                this.amf3Str(cls);
+                for (var i = 0; i < members.length; i++) this.amf3Str(members[i]);
+                this._tr[trKey] = this._trl.length;
+                this._trl.push(trKey);
+            }
+            for (var i = 0; i < members.length; i++) this.amf3Val(v[members[i]]);
+            return;
+        }
+    };
+
+    // Build an AMF0 envelope carrying a single AMF3-typed body.
+    // target: Flex remoting service method (e.g. "GameService.sendServerAction")
+    // response: response counter string (e.g. "/3")
+    // amf3Body: the JS value to encode as AMF3 (typically an Array of arguments)
+    W.envelope = function(target, response, amf3Body) {
+        this.u8(0x00); this.u8(0x03);   // AMF0 version
+        this.u16be(0);                   // 0 headers
+        this.u16be(1);                   // 1 body
+        this.amf0Str(target);
+        this.amf0Str(response);
+        this.s32be(-1);                  // body length unknown
+        this.u8(0x11);                   // AMF3 switch
+        this.amf3Val(amf3Body);
+    };
+
+    W.toBuffer = function() {
+        var ab = new ArrayBuffer(this._b.length);
+        var u8 = new Uint8Array(ab);
+        for (var i = 0; i < this._b.length; i++) u8[i] = this._b[i];
+        return ab;
+    };
+
+    // ── _TSORPC namespace ─────────────────────────────────────────────────
+
+    var _counter = 1;
+
+    function getRealmUrl() {
+        return window._tsoRealmUrl || null;
+    }
+
+    function uuid() {
+        if (typeof crypto !== 'undefined' && crypto.randomUUID) return crypto.randomUUID();
+        return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function(c) {
+            var r = Math.random() * 16 | 0;
+            return (c === 'x' ? r : (r & 0x3 | 0x8)).toString(16);
+        });
+    }
+
+    // POST an AMF envelope whose body is argsArray (an AMF3 Array).
+    // Target is always the string "null" (observed from Phase 1 capture).
+    // Returns Promise resolving to the parsed first response body value.
+    function sendAMF(argsArray) {
+        var url = getRealmUrl();
+        if (!url) return Promise.reject(new Error('_TSORPC: realm URL not yet discovered'));
+        var w = new AMFWriter();
+        w.envelope('null', '/' + (_counter++), argsArray);
+        var buf = w.toBuffer();
+        webkit.messageHandlers.logger.postMessage('[AMF3:out] POST bytes=' + buf.byteLength);
+        return fetch(url, {
+            method: 'POST',
+            credentials: 'include',
+            headers: { 'Content-Type': 'application/x-amf' },
+            body: buf,
+        }).then(function(resp) {
+            return resp.arrayBuffer();
+        }).then(function(ab) {
+            if (window._TSOAMFParser) {
+                try {
+                    var p = new window._TSOAMFParser(ab);
+                    var bodies = p.parseEnvelope();
+                    return bodies.length > 0 ? bodies[0].value : null;
+                } catch (_) {}
+            }
+            return ab;
+        });
+    }
+
+    // Build the full RemotingMessage → dServerCall → dServerAction → VO chain
+    // and POST it. opcode=95 for specialist tasks.
+    // subTaskID encodes the deposit/task type (0 = default / any).
+    // Key order in each object literal must match the observed trait member order.
+    function dispatchSpecialist(opts) {
+        var ctx = window._tsoAuthCtx;
+        if (!ctx || !ctx.dsoAuthToken) {
+            webkit.messageHandlers.logger.postMessage(
+                '[_TSORPC] auth not ready — make a manual game action first');
+            return Promise.reject(new Error('auth not ready'));
+        }
+
+        var uid1      = opts.uid1 | 0;
+        var uid2      = opts.uid2 | 0;
+        var subTaskID = (opts.taskCode !== undefined ? opts.taskCode : (opts.subTaskID | 0));
+        var grid      = opts.targetGrid | 0;
+        var endGrid   = opts.endGrid    | 0;
+
+        // ── VO objects — member key order matches observed AMF3 trait definitions ──
+
+        var uniqueID = {
+            __class:   'defaultGame.Communication.VO.dUniqueID',
+            uniqueID1: uid1,
+            uniqueID2: uid2,
+        };
+        var taskVO = {
+            __class:     'defaultGame.Communication.VO.dStartSpecialistTaskVO',
+            uniqueID:    uniqueID,
+            subTaskID:   subTaskID,
+            paramString: null,
+        };
+        var action = {
+            __class:  'defaultGame.Communication.VO.dServerAction',
+            type:     0,
+            grid:     grid,
+            endGrid:  endGrid,
+            data:     taskVO,
+        };
+        var call = {
+            __class:               'defaultGame.Communication.VO.dServerCall',
+            type:                  95,
+            zoneID:                ctx.zoneID,
+            data:                  action,
+            dsoAuthUser:           ctx.dsoAuthUser,
+            dsoAuthToken:          ctx.dsoAuthToken,
+            dsoAuthRandomClientID: ctx.dsoAuthRandomClientID,
+        };
+        var headers = {
+            __class:    '',
+            DSEndpoint: 'SMC-Endpoint',
+            DSId:       ctx.DSId,
+        };
+        var msg = {
+            __class:        'flex.messaging.messages.RemotingMessage',
+            source:         'com.bluebyte.game.servlet.EventHandler',
+            operation:      'ExecuteServerCall',
+            parameters:     null,
+            remoteUsername: null,
+            remotePassword: null,
+            correlationId:  null,
+            body:           [call],
+            clientId:       null,
+            destination:    'SMC',
+            headers:        headers,
+            messageId:      uuid(),
+            timestamp:      0,
+            timeToLive:     0,
+        };
+
+        webkit.messageHandlers.logger.postMessage(
+            '[_TSORPC] dispatchSpecialist uid=' + uid1 + ':' + uid2 +
+            ' subTaskID=' + subTaskID + ' zone=' + ctx.zoneID);
+
+        return sendAMF([msg]).then(function(result) {
+            webkit.messageHandlers.logger.postMessage(
+                '[_TSORPC] ack: ' + JSON.stringify(result));
+        }).catch(function(e) {
+            webkit.messageHandlers.logger.postMessage('[_TSORPC] error: ' + e);
+        });
+    }
+
+    window._TSORPC = { sendAMF: sendAMF, dispatchSpecialist: dispatchSpecialist };
+    window._TSOAMFWriter = AMFWriter;
+
+    // Register TSOBridge handlers for Swift-initiated dispatches.
+    if (window.TSOBridge) {
+        window.TSOBridge.register('DISPATCH_SPECIALIST', function(p) {
+            dispatchSpecialist(p);
+        });
+        window.TSOBridge.register('RPC_SEND', function(p) {
+            sendAMF(p.args || []);
+        });
+    }
+
+    webkit.messageHandlers.logger.postMessage('[AMF3Encoder] ready');
 })();
 """#
