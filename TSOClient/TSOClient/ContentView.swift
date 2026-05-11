@@ -11,21 +11,15 @@ struct WebView: NSViewRepresentable {
     func makeNSView(context: Context) -> WKWebView {
         let config = WKWebViewConfiguration()
         config.preferences.javaScriptCanOpenWindowsAutomatically = true
-        config.setURLSchemeHandler(HighlightSchemeHandler(), forURLScheme: "tso-asset")
-
         let controller = config.userContentController
 
-        // Injection order: bridge → scanner (inbound AMF + outbound capture) →
-        // encoder (_TSORPC send primitive) → patcher (texture substitution).
-        // jsOverlay and jsURLRewriter are disabled — collectible highlighting is
-        // done by jsCollectiblePatcher (texture substitution via fetch interception).
+        // Injection order: bridge → scanner → encoder → patcher. The patcher must
+        // run after the scanner because it wraps the scanner's already-patched fetch.
         for (source, frame) in [
-            (jsBridge,              false),
-            // (jsOverlay,          false),  // disabled: replaced by texture patcher
-            (jsAMF3Scanner,         false),
-            (jsAMF3Encoder,         false),  // AMF3 encoder + _TSORPC send primitive
-            // (jsURLRewriter,      false),  // disabled: dormant under Unity client
-            (jsCollectiblePatcher,  false),
+            (jsBridge,             false),
+            (jsAMF3Scanner,        false),
+            (jsAMF3Encoder,        false),
+            (jsCollectiblePatcher, false),
         ] as [(String, Bool)] {
             controller.addUserScript(
                 WKUserScript(source: source,
@@ -128,15 +122,10 @@ struct WebView: NSViewRepresentable {
                     if payload.state == "ZONE_LEFT" {
                         self.store.clear()
                         self.specialistsStore.clear()
-                        self.webView?.evaluateJavaScript(
-                            "window._TSOOverlay?.setCollectibles([]);window._TSOOverlay?.resyncCamera()",
-                            completionHandler: nil)
                     }
                 case .specialists(let payload):
                     self.specialistsStore.apply(payload)
                     print("[TSO] Specialists received: \(payload.items.count)")
-                case .calibrationDone(let payload):
-                    print("[TSO] Calibration: tileHW=\(payload.tileHW) tileHH=\(payload.tileHH) origin=(\(payload.originX),\(payload.originY))")
                 }
             }
         }
@@ -148,7 +137,6 @@ struct WebView: NSViewRepresentable {
 struct ContentView: View {
     @State private var store = CollectiblesStore()
     @State private var specialistsStore = SpecialistsStore()
-    @State private var webViewRef: WKWebView? = nil
 
     var body: some View {
         HSplitView {
@@ -164,17 +152,12 @@ struct ContentView: View {
                     taskCode:\(subTaskID),targetGrid:\(targetGrid)
                 })
                 """
-                // Evaluate in the webView held by the coordinator.
-                // We access it through a notification since WebView is NSViewRepresentable.
                 NotificationCenter.default.post(
                     name: .tsoEvaluateJS, object: nil,
                     userInfo: ["js": js])
             }
         }
         .frame(minWidth: 1100, minHeight: 768)
-        .onReceive(NotificationCenter.default.publisher(for: .tsoWebViewReady)) { note in
-            webViewRef = note.object as? WKWebView
-        }
     }
 }
 
@@ -212,602 +195,6 @@ private let jsBridge = #"""
             else { console.log('[TSOBridge] unhandled type:', msg.type); }
         }
     };
-})();
-"""#
-
-// ─────────────────────────────────────────────────────────────────────────────
-// 2. Overlay — transparent canvas drawn over the game; isometric coordinate
-//    system with two-point calibration. Camera pan is tracked via a
-//    requestAnimationFrame loop that reads game-runtime globals (Pinky-style)
-//    rather than MutationObserver — TSO HTML5 pans by internal canvas transform,
-//    not CSS style mutations on the canvas element.
-// ─────────────────────────────────────────────────────────────────────────────
-private let jsOverlay = #"""
-(function() {
-    'use strict';
-
-    // Calibration — world-space so it survives camera pans.
-    // AMF (gx,gy) are axis-aligned with screen: gx roughly horizontal, gy roughly vertical.
-    // screenX = gx*scaleX + originX - camera.x
-    // screenY = gy*scaleY + originY - camera.y
-    var cal = {
-        originX: 0, originY: 0,
-        scaleX:  120, scaleY: 40,
-        shearXY: 0,   shearYX: 0,  // off-diagonal affine: screenX += shearXY*gy, screenY += shearYX*gx
-    };
-
-    var style = {
-        markerRadius: 14,
-        markerColor:  '#FFD700',
-        markerAlpha:  0.85,
-        glowColor:    '#FFD700',
-        glowBlur:     22,
-    };
-
-    var collectibles = [];
-    var enabled      = true;
-    var overlay, ctx;
-
-    var camera    = { x: 0, y: 0 };
-    var _synthCam = { x: 0, y: 0 };
-    var _dragLast  = null;
-    var _lastTap   = null;
-
-    var _mayorGx = -1, _mayorGy = -1;
-    var _allBuildings    = [];   // [{x, y, name}] from scanner
-    var _cachedMapWidth  = 0, _cachedMapHeight = 0;
-
-    // ── Calibration state ─────────────────────────────────────────────────
-    // ADJUST: fine-tune with keys, Alt+click for 2pt refine, Enter to save.
-    // Enter → save; Esc → restore last saved; Shift+C → toggle.
-    var _calMode  = false;
-    var _calPhase = 'ADJUST';
-    var _anchorA  = null;           // {gx, gy, sx, sy}
-    var _anchorB  = null;
-    var _cursorSX = -1, _cursorSY = -1;
-
-    var _pickupPoints = [];
-
-    // ── Canvas lifecycle ──────────────────────────────────────────────────
-
-    function ensureOverlay() {
-        if (overlay && document.body.contains(overlay)) return true;
-        var wrap = document.createElement('div');
-        wrap.id = '_tso_overlay_wrap';
-        wrap.style.cssText = 'position:fixed;inset:0;pointer-events:none;z-index:50;overflow:hidden;';
-        overlay = document.createElement('canvas');
-        overlay.id = '_tso_overlay';
-        overlay.style.cssText = 'position:absolute;top:0;left:0;';
-        overlay.width  = window.innerWidth;
-        overlay.height = window.innerHeight;
-        wrap.appendChild(overlay);
-        document.body.appendChild(wrap);
-        ctx = overlay.getContext('2d');
-        window.addEventListener('resize', function() {
-            overlay.width  = window.innerWidth;
-            overlay.height = window.innerHeight;
-            render();
-        });
-        return true;
-    }
-
-    // ── Coordinate transforms ─────────────────────────────────────────────
-
-    function gridToScreen(gx, gy) {
-        return {
-            x: cal.scaleX*gx + cal.shearXY*gy + cal.originX - camera.x,
-            y: cal.shearYX*gx + cal.scaleY*gy  + cal.originY - camera.y,
-        };
-    }
-
-    function screenToGrid(sx, sy) {
-        var det = cal.scaleX*cal.scaleY - cal.shearXY*cal.shearYX;
-        if (Math.abs(det) < 0.001) return { gx: 0, gy: 0 };
-        var wx = sx + camera.x - cal.originX;
-        var wy = sy + camera.y - cal.originY;
-        return {
-            gx: ( cal.scaleY*wx - cal.shearXY*wy) / det,
-            gy: (-cal.shearYX*wx + cal.scaleX*wy) / det,
-        };
-    }
-
-    // ── Rendering ─────────────────────────────────────────────────────────
-
-    function drawMarker(sx, sy) {
-        ctx.save();
-        ctx.shadowColor = style.glowColor; ctx.shadowBlur = style.glowBlur;
-        ctx.globalAlpha = style.markerAlpha; ctx.fillStyle = style.markerColor;
-        ctx.beginPath(); ctx.arc(sx, sy, style.markerRadius, 0, Math.PI * 2); ctx.fill();
-        ctx.shadowBlur = 0; ctx.globalAlpha = 1; ctx.fillStyle = '#FFFFFF';
-        ctx.beginPath(); ctx.arc(sx, sy, 4, 0, Math.PI * 2); ctx.fill();
-        ctx.restore();
-    }
-
-    function render() {
-        if (!ensureOverlay() || !ctx) return;
-        ctx.clearRect(0, 0, overlay.width, overlay.height);
-        var w = overlay.width, h = overlay.height;
-
-        // Collectible markers
-        if (enabled && collectibles.length > 0) {
-            for (var i = 0; i < collectibles.length; i++) {
-                var c = collectibles[i];
-                var s = gridToScreen(c.x, c.y);
-                if (s.x <= -60 || s.x >= w + 60 || s.y <= -60 || s.y >= h + 60) continue;
-                drawMarker(s.x, s.y);
-            }
-        }
-
-        if (!_calMode) return;
-
-        // ── Cal-mode diagnostics ──────────────────────────────────────────
-
-        // All named buildings as labeled cyan dots.
-        // The user aligns these dots with the actual buildings visible in the game.
-        ctx.save();
-        ctx.font = '9px monospace';
-        for (var bi = 0; bi < _allBuildings.length; bi++) {
-            var b  = _allBuildings[bi];
-            var bs = gridToScreen(b.x, b.y);
-            if (bs.x < -40 || bs.x > w + 40 || bs.y < -40 || bs.y > h + 40) continue;
-            ctx.globalAlpha = 0.50; ctx.fillStyle = '#00FFFF';
-            ctx.beginPath(); ctx.arc(bs.x, bs.y, 4, 0, 6.283); ctx.fill();
-            if (b.name) {
-                ctx.globalAlpha = 0.70; ctx.fillStyle = '#AAFFFF';
-                ctx.fillText(b.name.slice(0, 16), bs.x + 6, bs.y + 3);
-            }
-        }
-        ctx.restore();
-
-        // 7×7 rectangular reference-grid probe centred on Mayor (or anchor if set)
-        var pgx = _anchorA ? _anchorA.gx : _mayorGx;
-        var pgy = _anchorA ? _anchorA.gy : _mayorGy;
-        if (pgx >= 0) {
-            ctx.save();
-            ctx.strokeStyle = '#FF00FF'; ctx.lineWidth = 1; ctx.globalAlpha = 0.28;
-            for (var dg = -3; dg <= 3; dg++) {
-                ctx.beginPath();
-                for (var dv = -3; dv <= 3; dv++) {
-                    var ptA = gridToScreen(pgx + dv, pgy + dg);
-                    if (dv === -3) ctx.moveTo(ptA.x, ptA.y); else ctx.lineTo(ptA.x, ptA.y);
-                }
-                ctx.stroke();
-                ctx.beginPath();
-                for (var du = -3; du <= 3; du++) {
-                    var ptB = gridToScreen(pgx + dg, pgy + du);
-                    if (du === -3) ctx.moveTo(ptB.x, ptB.y); else ctx.lineTo(ptB.x, ptB.y);
-                }
-                ctx.stroke();
-            }
-            ctx.globalAlpha = 0.60; ctx.fillStyle = '#FF00FF';
-            for (var ix = -3; ix <= 3; ix++) {
-                for (var iy = -3; iy <= 3; iy++) {
-                    var ip = gridToScreen(pgx + ix, pgy + iy);
-                    if (ip.x < -20 || ip.x > w + 20 || ip.y < -20 || ip.y > h + 20) continue;
-                    ctx.beginPath(); ctx.arc(ip.x, ip.y, 3, 0, 6.283); ctx.fill();
-                }
-            }
-            ctx.restore();
-        }
-
-        // Map-extent diamond
-        if (_cachedMapWidth > 0 && _cachedMapHeight > 0) {
-            var mw = _cachedMapWidth - 1, mh = _cachedMapHeight - 1;
-            var corners = [
-                { gx: 0,  gy: 0,  label: '(0,0)' },
-                { gx: mw, gy: 0,  label: '(W,0)' },
-                { gx: 0,  gy: mh, label: '(0,H)' },
-                { gx: mw, gy: mh, label: '(W,H)' },
-            ];
-            var cs = corners.map(function(c) { return gridToScreen(c.gx, c.gy); });
-            ctx.save();
-            ctx.strokeStyle = '#4488FF'; ctx.lineWidth = 1.5; ctx.globalAlpha = 0.55;
-            ctx.beginPath();
-            ctx.moveTo(cs[0].x, cs[0].y); ctx.lineTo(cs[1].x, cs[1].y);
-            ctx.lineTo(cs[3].x, cs[3].y); ctx.lineTo(cs[2].x, cs[2].y);
-            ctx.closePath(); ctx.stroke();
-            ctx.fillStyle = '#4488FF'; ctx.font = 'bold 10px monospace'; ctx.globalAlpha = 0.85;
-            for (var ci = 0; ci < corners.length; ci++) {
-                if (cs[ci].x < -80 || cs[ci].x > w + 80 || cs[ci].y < -80 || cs[ci].y > h + 80) continue;
-                ctx.beginPath(); ctx.arc(cs[ci].x, cs[ci].y, 5, 0, 6.283); ctx.fill();
-                ctx.fillText(corners[ci].label, cs[ci].x + 8, cs[ci].y + 4);
-            }
-            ctx.restore();
-        }
-
-        // Second-anchor crosshair (green) — set via Alt+click on a collectible
-        if (_anchorB) {
-            ctx.save();
-            ctx.strokeStyle = '#00FF88'; ctx.lineWidth = 2; ctx.globalAlpha = 0.9;
-            var bx = _anchorB.sx, by = _anchorB.sy;
-            ctx.beginPath(); ctx.moveTo(bx - 16, by); ctx.lineTo(bx + 16, by); ctx.stroke();
-            ctx.beginPath(); ctx.moveTo(bx, by - 16); ctx.lineTo(bx, by + 16); ctx.stroke();
-            ctx.beginPath(); ctx.arc(bx, by, 7, 0, 6.283); ctx.stroke();
-            ctx.fillStyle = '#00FF88'; ctx.font = 'bold 9px monospace'; ctx.globalAlpha = 0.85;
-            ctx.fillText('B(' + _anchorB.gx + ',' + _anchorB.gy + ')', bx + 10, by + 4);
-            ctx.restore();
-        }
-
-        // Mayor anchor crosshair
-        if (_anchorA) {
-            ctx.save();
-            ctx.strokeStyle = '#FF00FF'; ctx.lineWidth = 3; ctx.globalAlpha = 0.9;
-            var ax = _anchorA.sx, ay = _anchorA.sy;
-            ctx.beginPath(); ctx.moveTo(ax - 22, ay); ctx.lineTo(ax + 22, ay); ctx.stroke();
-            ctx.beginPath(); ctx.moveTo(ax, ay - 22); ctx.lineTo(ax, ay + 22); ctx.stroke();
-            ctx.beginPath(); ctx.arc(ax, ay, 10, 0, 6.283); ctx.stroke();
-            ctx.restore();
-        }
-
-        // HUD
-        var curGrid = (_anchorA && _cursorSX >= 0) ? screenToGrid(_cursorSX, _cursorSY) : null;
-        var hint = _calPhase === 'WAIT_CLICK_A' ? 'Click the blue collectible marked 1' :
-                   _calPhase === 'WAIT_CLICK_B' ? 'Click the blue collectible marked 2' :
-                   _calPhase === 'WAIT_CLICK_C' ? 'Click the blue collectible marked 3' :
-                   'Arrows=nudge  [/]=scaleX  Alt+[/]=scaleY  {/}=shearXY  Alt+{/}=shearYX  Shift=fine(±0.05)  Alt+click=2pt  Enter=save  Esc=cancel';
-        var shearStr = _calPhase === 'ADJUST'
-                       ? '  shear=(' + cal.shearXY.toFixed(2) + ',' + cal.shearYX.toFixed(2) + ')' : '';
-        var hud = '[' + _calPhase + ']  scaleX=' + cal.scaleX.toFixed(2) +
-                  '  scaleY=' + cal.scaleY.toFixed(2) + shearStr +
-                  (curGrid ? '  cur=(' + curGrid.gx.toFixed(1) + ',' + curGrid.gy.toFixed(1) + ')' : '') +
-                  '  ' + hint;
-        ctx.save();
-        ctx.fillStyle = 'rgba(0,0,0,0.72)';
-        ctx.fillRect(4, 4, w - 8, 30);
-        ctx.fillStyle = '#FFFFFF'; ctx.font = 'bold 12px monospace';
-        ctx.fillText(hud, 10, 25);
-        ctx.restore();
-    }
-
-    // ── Calibration helpers ───────────────────────────────────────────────
-
-    function recomputeOriginFromA() {
-        if (!_anchorA) return;
-        cal.originX = _anchorA.sx - cal.scaleX*_anchorA.gx - cal.shearXY*_anchorA.gy;
-        cal.originY = _anchorA.sy - cal.shearYX*_anchorA.gx - cal.scaleY*_anchorA.gy;
-    }
-
-    // ── Calibration persistence ───────────────────────────────────────────
-    var CAL_KEY = '_tso_cal_v6';
-
-    function saveCalibration() {
-        if (!_anchorA) {
-            webkit.messageHandlers.logger.postMessage('[Overlay] Cal not saved — click Mayor first');
-            return;
-        }
-        try {
-            var d = {
-                scaleX: cal.scaleX, scaleY: cal.scaleY,
-                shearXY: cal.shearXY, shearYX: cal.shearYX,
-                anchorA: { gx: _anchorA.gx, gy: _anchorA.gy, sx: _anchorA.sx, sy: _anchorA.sy },
-                ww: window.innerWidth, wh: window.innerHeight,
-            };
-            localStorage.setItem(CAL_KEY, JSON.stringify(d));
-            webkit.messageHandlers.logger.postMessage(
-                '[Overlay] Cal saved v6: scaleX=' + cal.scaleX.toFixed(4) +
-                ' scaleY=' + cal.scaleY.toFixed(4) +
-                ' Mayor=(' + _anchorA.sx.toFixed(1) + ',' + _anchorA.sy.toFixed(1) + ')' +
-                ' at ' + window.innerWidth + 'x' + window.innerHeight);
-        } catch(e) {}
-    }
-
-    function loadStoredCalibration() {
-        try {
-            var d = JSON.parse(localStorage.getItem(CAL_KEY) || 'null');
-            if (!d || !d.anchorA) return null;
-            cal.scaleX = d.scaleX; cal.scaleY = d.scaleY;
-            cal.shearXY = d.shearXY || 0; cal.shearYX = d.shearYX || 0;
-            webkit.messageHandlers.logger.postMessage(
-                '[Overlay] Cal loaded v6: scaleX=' + cal.scaleX.toFixed(4) + ' scaleY=' + cal.scaleY.toFixed(4) +
-                ' shearXY=' + cal.shearXY.toFixed(4) + ' shearYX=' + cal.shearYX.toFixed(4));
-            return d;
-        } catch(e) { return null; }
-    }
-
-    function autoCalibrateFromMayor(gx, gy) {
-        _mayorGx = gx; _mayorGy = gy;
-        _synthCam.x = 0; _synthCam.y = 0;
-        camera.x = 0; camera.y = 0; _lastCamX = 0; _lastCamY = 0;
-        try {
-            var d = JSON.parse(localStorage.getItem(CAL_KEY) || 'null');
-            if (d && d.anchorA && typeof d.scaleX === 'number') {
-                cal.scaleX = d.scaleX; cal.scaleY = d.scaleY;
-                cal.shearXY = d.shearXY || 0; cal.shearYX = d.shearYX || 0;
-                var winScaleX = window.innerWidth  / d.ww;
-                var winScaleY = window.innerHeight / d.wh;
-                _anchorA = { gx: gx, gy: gy,
-                             sx: d.anchorA.sx * winScaleX, sy: d.anchorA.sy * winScaleY };
-                recomputeOriginFromA();
-                _pickupPoints = [{ gx: gx, gy: gy, wx: _anchorA.sx, wy: _anchorA.sy }];
-                render();
-                webkit.messageHandlers.logger.postMessage(
-                    '[Overlay] Warm start v6. Mayor=(' + _anchorA.sx.toFixed(1) + ',' + _anchorA.sy.toFixed(1) + ')' +
-                    ' origin=(' + cal.originX.toFixed(1) + ',' + cal.originY.toFixed(1) + ')');
-            } else {
-                // No saved cal — enter ADJUST with a rough initial scale; user tweaks with keys.
-                _calMode  = true;
-                _calPhase = 'ADJUST';
-                _anchorB  = null;
-                if (_cachedMapWidth > 0 && _cachedMapHeight > 0) {
-                    cal.scaleX = (window.innerWidth  * 0.8) / _cachedMapWidth;
-                    cal.scaleY = (window.innerHeight * 0.8) / _cachedMapHeight;
-                }
-                _anchorA = { gx: gx, gy: gy,
-                             sx: window.innerWidth  / 2,
-                             sy: window.innerHeight / 2 };
-                recomputeOriginFromA();
-                render();
-                webkit.messageHandlers.logger.postMessage(
-                    '[Overlay] No saved cal — use {/} keys to calibrate, then Enter to save.');
-            }
-        } catch(e) {}
-    }
-
-    function recordPickupCalibPoint(gx, gy) {
-        if (!_lastTap || Date.now() - _lastTap.time > 15000) {
-            webkit.messageHandlers.logger.postMessage(
-                '[Overlay] Pickup (' + gx + ',' + gy + ') — no recent tap, skipping cal');
-            return;
-        }
-        var tapX = _lastTap.x + camera.x;   // world-space X
-        _pickupPoints.push({ gx: gx, gy: gy, wx: tapX, wy: _lastTap.y + camera.y });
-        var n = _pickupPoints.length;
-        webkit.messageHandlers.logger.postMessage(
-            '[Overlay] Pickup anchor #' + n + ': (' + gx + ',' + gy + ') world-x=' + tapX.toFixed(1));
-
-        if (n >= 2 && _anchorA) {
-            // X-only scaleX solve using Mayor (p0) and this pickup.
-            // Y click is unreliable (sprite sits above ground tile); X is symmetric.
-            var p0 = _pickupPoints[0];
-            var dgx = gx - p0.gx;
-            if (Math.abs(dgx) < 2) {
-                webkit.messageHandlers.logger.postMessage(
-                    '[Overlay] Pickup too close in grid-X (dgx=' + dgx + '), skipping');
-                _pickupPoints.pop(); return;
-            }
-            var newSX = (tapX - p0.wx) / dgx;
-            if (newSX < 10 || newSX > 400) {
-                webkit.messageHandlers.logger.postMessage(
-                    '[Overlay] Pickup scaleX=' + newSX.toFixed(2) + ' out of [10,400], skipping');
-                _pickupPoints.pop(); return;
-            }
-            cal.scaleX = newSX;
-            recomputeOriginFromA();
-            if (_anchorA) saveCalibration();
-            webkit.messageHandlers.logger.postMessage(
-                '[Overlay] Pickup refined: scaleX=' + cal.scaleX.toFixed(4));
-        } else if (n === 1 && _anchorA) {
-            // Single pickup with anchor A: snap originX from X (don't change scale)
-            cal.originX = tapX - gx * cal.scaleX;
-            _anchorA.sx = tapX - camera.x;
-            webkit.messageHandlers.logger.postMessage('[Overlay] Origin snapped from pickup X');
-        }
-        render();
-    }
-
-    // ── rAF camera loop ───────────────────────────────────────────────────
-
-    var _lastCamX = 0, _lastCamY = 0;
-
-    function rafLoop() {
-        if (_synthCam.x !== _lastCamX || _synthCam.y !== _lastCamY) {
-            camera.x = _synthCam.x; camera.y = _synthCam.y;
-            _lastCamX = _synthCam.x; _lastCamY = _synthCam.y;
-            render();
-        }
-        requestAnimationFrame(rafLoop);
-    }
-
-    // ── Pointer / mouse tracking ──────────────────────────────────────────
-
-    function initPointerDrag() {
-        window.addEventListener('pointerdown', function(e) {
-            if (!e.isPrimary || (e.target && e.target.id === '_tso_overlay')) return;
-            _dragLast = { x: e.clientX, y: e.clientY };
-        }, { capture: true, passive: true });
-
-        window.addEventListener('pointermove', function(e) {
-            if (!e.isPrimary) return;
-            _cursorSX = e.clientX; _cursorSY = e.clientY;
-            if (!e.buttons || !_dragLast || (e.target && e.target.id === '_tso_overlay')) return;
-            var m = 4;
-            if (e.clientX <= m || e.clientX >= window.innerWidth  - m ||
-                e.clientY <= m || e.clientY >= window.innerHeight - m) {
-                _dragLast = { x: e.clientX, y: e.clientY }; return;
-            }
-            _synthCam.x -= e.clientX - _dragLast.x;
-            _synthCam.y -= e.clientY - _dragLast.y;
-            _dragLast = { x: e.clientX, y: e.clientY };
-        }, { capture: true, passive: true });
-
-        window.addEventListener('mousemove', function(e) {
-            if (!_calMode) return;
-            _cursorSX = e.clientX; _cursorSY = e.clientY;
-            render();
-        }, { capture: true, passive: true });
-
-        window.addEventListener('pointerup', function(e) {
-            if (e.isPrimary) _dragLast = null;
-        }, { capture: true, passive: true });
-        window.addEventListener('pointercancel', function(e) {
-            // Do NOT clear _dragLast — Unity setPointerCapture fires cancel mid-drag
-        }, { capture: true, passive: true });
-
-        window.addEventListener('mouseup', function(e) {
-            // Alt+click in ADJUST → two-point refinement using a nearby collectible
-            if (_calMode && _calPhase === 'ADJUST' && e.button === 0 && e.altKey &&
-                _anchorA && collectibles.length > 0) {
-                var minD2 = Infinity, bestC = null;
-                for (var ci = 0; ci < collectibles.length; ci++) {
-                    var ps = gridToScreen(collectibles[ci].x, collectibles[ci].y);
-                    var d2 = (ps.x - e.clientX) * (ps.x - e.clientX) +
-                             (ps.y - e.clientY) * (ps.y - e.clientY);
-                    if (d2 < minD2) { minD2 = d2; bestC = collectibles[ci]; }
-                }
-                if (bestC) {
-                    _anchorB = { gx: bestC.x, gy: bestC.y, sx: e.clientX, sy: e.clientY };
-                    var dgx = _anchorB.gx - _anchorA.gx;
-                    var dgy = _anchorB.gy - _anchorA.gy;
-                    var dsx = _anchorB.sx - _anchorA.sx;
-                    var dsy = _anchorB.sy - _anchorA.sy;
-                    var changed = false;
-                    if (Math.abs(dgx) > 2) { cal.scaleX = dsx / dgx; changed = true; }
-                    if (Math.abs(dgy) > 2) { cal.scaleY = dsy / dgy; changed = true; }
-                    if (changed) recomputeOriginFromA();
-                    webkit.messageHandlers.logger.postMessage(
-                        '[Overlay] 2pt-cal: B=(' + _anchorB.gx + ',' + _anchorB.gy + ')' +
-                        ' click=(' + e.clientX + ',' + e.clientY + ')' +
-                        ' scaleX=' + cal.scaleX.toFixed(3) + ' scaleY=' + cal.scaleY.toFixed(3));
-                    render();
-                }
-                return;
-            }
-
-            _lastTap = { time: Date.now(), x: e.clientX, y: e.clientY };
-            webkit.messageHandlers.logger.postMessage('[Overlay] Tap: (' + e.clientX + ',' + e.clientY + ') btn=' + e.button);
-        }, { capture: true, passive: true });
-    }
-
-    // ── Public API ────────────────────────────────────────────────────────
-
-    window._TSOOverlay = {
-        setCollectibles: function(items) { collectibles = items; render(); },
-        setBuildings:    function(items) { _allBuildings = items; },
-        setMapDims:      function(w, h)  { _cachedMapWidth = w; _cachedMapHeight = h; },
-        setEnabled:      function(v)     { enabled = v; render(); },
-        setColor:        function(hex)   { style.markerColor = hex; style.glowColor = hex; render(); },
-        render: render,
-        getCalibration: function() { return Object.assign({}, cal); },
-        getCamera:      function() { return Object.assign({}, camera); },
-        autoCalibrateFromMayor: autoCalibrateFromMayor,
-        recordPickupCalibPoint: recordPickupCalibPoint,
-        resyncCamera: function() {
-            _synthCam.x = 0; _synthCam.y = 0;
-            camera.x = 0; camera.y = 0; _lastCamX = 0; _lastCamY = 0;
-            render();
-            webkit.messageHandlers.logger.postMessage('[Overlay] Camera resynced');
-        },
-        toggleCalMode: function() {
-            _calMode = !_calMode;
-            _calPhase = 'ADJUST';
-            if (_calMode) {
-                webkit.messageHandlers.logger.postMessage('[Overlay] Cal mode ON — {/} scaleX  Alt+{/} scaleY  Ctrl+{/} shearXY  Ctrl+Alt+{/} shearYX  Shift=fine  Arrows=nudge  Enter=save');
-            } else {
-                webkit.messageHandlers.logger.postMessage('[Overlay] Cal mode OFF');
-            }
-            render();
-        },
-        calibrate: function(gx1, gy1, sx1, sy1, gx2, gy2, sx2, sy2) {
-            // Swift two-point bridge (kept for compatibility)
-            var wx1 = sx1 + camera.x, wy1 = sy1 + camera.y;
-            var wx2 = sx2 + camera.x, wy2 = sy2 + camera.y;
-            if (gx2 !== gx1) cal.scaleX = (wx2 - wx1) / (gx2 - gx1);
-            if (gy2 !== gy1) cal.scaleY = (wy2 - wy1) / (gy2 - gy1);
-            cal.originX = wx1 - gx1 * cal.scaleX;
-            cal.originY = wy1 - gy1 * cal.scaleY;
-            render();
-        },
-    };
-
-    window.addEventListener('keydown', function(e) {
-        // Debug: confirm handler fires for our keys and show cal state.
-        var _dbgKeys = { Digit1:1, KeyR:1, KeyC:1, BracketLeft:1, BracketRight:1,
-                         ArrowLeft:1, ArrowRight:1, ArrowUp:1, ArrowDown:1,
-                         Enter:1, Escape:1 };
-        var _isCurly = e.key === '{' || e.key === '}';
-        if (_dbgKeys[e.code] || _isCurly) {
-            webkit.messageHandlers.logger.postMessage(
-                '[Overlay] key=' + e.key + '(' + e.code + ') shift=' + e.shiftKey +
-                ' alt=' + e.altKey + ' calMode=' + _calMode + ' phase=' + _calPhase);
-        }
-        if (e.code === 'Digit1' && !e.shiftKey && !e.ctrlKey && !e.metaKey && !e.altKey) {
-            _synthCam.x = 0; _synthCam.y = 0;
-            camera.x = 0; camera.y = 0; _lastCamX = 0; _lastCamY = 0;
-            render();
-            webkit.messageHandlers.logger.postMessage('[Overlay] Key-1 camera resync');
-        }
-        if (e.shiftKey && e.code === 'KeyR') { window._TSOOverlay.resyncCamera(); return; }
-        if (e.shiftKey && e.code === 'KeyC') { window._TSOOverlay.toggleCalMode(); return; }
-        if (!_calMode || _calPhase !== 'ADJUST') return;
-
-        var isArrow   = e.code === 'ArrowLeft'  || e.code === 'ArrowRight' ||
-                        e.code === 'ArrowUp'    || e.code === 'ArrowDown';
-        var isBracket = e.code === 'BracketLeft' || e.code === 'BracketRight' ||
-                        e.key === '{' || e.key === '}';
-        var isConfirm = e.code === 'Enter' || e.code === 'Escape';
-        if (isArrow || isBracket || isConfirm) { e.preventDefault(); e.stopPropagation(); }
-
-        // Arrow keys nudge the Mayor anchor (shifts origin, keeping tile sizes)
-        if (isArrow && _anchorA) {
-            var step = e.shiftKey ? 1 : 5;
-            if (e.code === 'ArrowLeft')  _anchorA.sx -= step;
-            if (e.code === 'ArrowRight') _anchorA.sx += step;
-            if (e.code === 'ArrowUp')    _anchorA.sy -= step;
-            if (e.code === 'ArrowDown')  _anchorA.sy += step;
-            recomputeOriginFromA(); render();
-        }
-
-        // [ / ] → scaleX  /  Alt+[ / ] → scaleY   plain=±0.5  Shift=fine±0.05
-        if (e.code === 'BracketLeft' || e.code === 'BracketRight') {
-            var step = e.shiftKey ? 0.05 : 0.5;
-            var dir  = e.code === 'BracketLeft' ? -1 : 1;
-            if (e.altKey) {
-                cal.scaleY = Math.max(-500, Math.min(500, cal.scaleY + dir * step));
-            } else {
-                cal.scaleX = Math.max(-500, Math.min(500, cal.scaleX + dir * step));
-            }
-            recomputeOriginFromA(); render();
-        }
-
-        // { / } → shearXY  /  Alt+{ / } → shearYX   plain=±0.5  Shift=fine±0.05
-        if (e.key === '{' || e.key === '}') {
-            var step = e.shiftKey ? 0.05 : 0.5;
-            var dir  = e.key === '{' ? -1 : 1;
-            if (e.altKey) {
-                cal.shearYX = Math.max(-500, Math.min(500, cal.shearYX + dir * step));
-            } else {
-                cal.shearXY = Math.max(-500, Math.min(500, cal.shearXY + dir * step));
-            }
-            recomputeOriginFromA(); render();
-        }
-
-        if (e.code === 'Enter') { saveCalibration(); _calMode = false; render(); }
-
-        if (e.code === 'Escape') {
-            _calMode = false;
-            try {
-                var prev = JSON.parse(localStorage.getItem(CAL_KEY) || 'null');
-                if (prev && prev.anchorA) {
-                    cal.scaleX = prev.scaleX; cal.scaleY = prev.scaleY;
-                    _anchorA = { gx: prev.anchorA.gx, gy: prev.anchorA.gy,
-                                 sx: prev.anchorA.sx * (window.innerWidth  / prev.ww),
-                                 sy: prev.anchorA.sy * (window.innerHeight / prev.wh) };
-                    recomputeOriginFromA();
-                }
-            } catch(_) {}
-            render();
-            webkit.messageHandlers.logger.postMessage('[Overlay] Cal cancelled');
-        }
-    }, { capture: true });
-
-    window.TSOBridge.register('SET_OVERLAY',       function(p) { window._TSOOverlay.setEnabled(!!p.enabled); });
-    window.TSOBridge.register('SET_OVERLAY_COLOR', function(p) { window._TSOOverlay.setColor(p.color); });
-    window.TSOBridge.register('RENDER',            function()  { window._TSOOverlay.render(); });
-    window.TSOBridge.register('CALIBRATE',         function(p) {
-        window._TSOOverlay.calibrate(p.gx1, p.gy1, p.sx1, p.sy1, p.gx2, p.gy2, p.sx2, p.sy2);
-    });
-
-    function init() {
-        loadStoredCalibration();
-        ensureOverlay();
-        initPointerDrag();
-        rafLoop();
-    }
-    if (document.readyState === 'loading') {
-        document.addEventListener('DOMContentLoaded', init);
-    } else {
-        init();
-    }
 })();
 """#
 
@@ -1424,9 +811,7 @@ private let jsAMF3Scanner = #"""
                 webkit.messageHandlers.logger.postMessage(
                     '[AMF3:' + channel + '] Destruct grid(' + dgx + ',' + dgy + ') gi=' + dgi + ' via ' + dSrc);
                 var dKey = String(dgi);
-                if (_prevCollectibles !== null && _prevCollectibles[dKey] && window._TSOOverlay) {
-                    var dit = _prevCollectibles[dKey];
-                    window._TSOOverlay.recordPickupCalibPoint(dit.x, dit.y);
+                if (_prevCollectibles !== null && _prevCollectibles[dKey]) {
                     var updated = {};
                     Object.keys(_prevCollectibles).forEach(function(k) {
                         if (k !== dKey) updated[k] = _prevCollectibles[k];
@@ -1445,39 +830,6 @@ private let jsAMF3Scanner = #"""
         }
 
         var result = buildResult(ctx);
-
-        // Push map dims and collectibles first so autoCalibrateFromMayor
-        // can pick calibration targets from the collectible list.
-        if (window._TSOOverlay && result.mapWidth > 0 && ctx.allBuildings.length > 0) {
-            var bldgPos = [];
-            for (var bii = 0; bii < ctx.allBuildings.length; bii++) {
-                var bgi = detectPosition(ctx.allBuildings[bii]);
-                if (bgi < 0) continue;
-                var bld = ctx.allBuildings[bii];
-                bldgPos.push({
-                    x:    bgi % result.mapWidth,
-                    y:    Math.floor(bgi / result.mapWidth),
-                    name: (typeof bld.buildingName_string === 'string' ? bld.buildingName_string
-                          : typeof bld.skin === 'string'               ? bld.skin : ''),
-                });
-            }
-            window._TSOOverlay.setBuildings(bldgPos);
-            window._TSOOverlay.setMapDims(result.mapWidth, result.mapHeight);
-        }
-        if (window._TSOOverlay) window._TSOOverlay.setCollectibles(result.items);
-
-        // ── Mayor's house auto-calibration (zone-load responses only) ─────
-        if (ctx.maps.length > 0 && window._TSOOverlay && result.mapWidth > 0) {
-            for (var mi = 0; mi < ctx.allBuildings.length; mi++) {
-                var mb = ctx.allBuildings[mi];
-                if ((mb.buildingName_string || mb.skin || '') === 'Mayorhouse') {
-                    var mgi = mb.buildingGrid | 0;
-                    window._TSOOverlay.autoCalibrateFromMayor(
-                        mgi % result.mapWidth, Math.floor(mgi / result.mapWidth));
-                    break;
-                }
-            }
-        }
 
         window._tsoSend('COLLECTIBLES', {
             mapWidth:  result.mapWidth,
@@ -1529,15 +881,6 @@ private let jsAMF3Scanner = #"""
         var currentSet = {};
         result.items.forEach(function(it) { currentSet[it.gridIndex] = it; });
 
-        if (_prevCollectibles !== null && window._TSOOverlay) {
-            var missing = Object.keys(_prevCollectibles).filter(function(gi) {
-                return !currentSet[gi];
-            });
-            if (missing.length === 1) {
-                window._TSOOverlay.recordPickupCalibPoint(
-                    _prevCollectibles[missing[0]].x, _prevCollectibles[missing[0]].y);
-            }
-        }
         _prevCollectibles = currentSet;
 
         webkit.messageHandlers.logger.postMessage(
@@ -1715,49 +1058,6 @@ private let jsAMF3Scanner = #"""
 })();
 """#
 
-// ─────────────────────────────────────────────────────────────────────────────
-// 4. URL rewriter — routes collectible <img> src through the Swift scheme handler
-//    so HighlightSchemeHandler can apply a glow effect.
-//    Dormant under the Unity client (sprites come from XHR-loaded textures, not
-//    individual <img> elements), but retained as a cheap safety net.
-// ─────────────────────────────────────────────────────────────────────────────
-private let jsURLRewriter = #"""
-(function() {
-    'use strict';
-
-    var PATTERNS = ['collectible', 'collect_', 'sammelitem', 'pickup_item', 'loot_'];
-    var _rewriteCount = 0;
-
-    function shouldRewrite(url) {
-        if (!url || !url.startsWith('https://')) return false;
-        var lower = url.toLowerCase();
-        return PATTERNS.some(function(p) { return lower.includes(p); });
-    }
-
-    function rewrite(url) {
-        if (!shouldRewrite(url)) return url;
-        _rewriteCount++;
-        return 'tso-asset' + url.slice(5);
-    }
-
-    // Patch HTMLImageElement.prototype.src
-    var srcDesc = Object.getOwnPropertyDescriptor(HTMLImageElement.prototype, 'src');
-    Object.defineProperty(HTMLImageElement.prototype, 'src', {
-        set: function(v) { srcDesc.set.call(this, rewrite(v)); },
-        get: function()  { return srcDesc.get.call(this); },
-        configurable: true,
-    });
-
-    // Diagnostic: zero rewrites after 30 s confirms Unity atlas loading
-    // (sprites served via XHR, not individual <img> URLs — see jsCollectiblePatcher).
-    setTimeout(function() {
-        webkit.messageHandlers.logger.postMessage(
-            '[URLRewriter] 30-s rewrite count: ' + _rewriteCount +
-            (_rewriteCount === 0 ? ' — dormant (expected: Unity uses XHR for textures)' : '')
-        );
-    }, 30000);
-})();
-"""#
 
 // ─────────────────────────────────────────────────────────────────────────────
 // 5. Collectible patcher — wraps XMLHttpRequest so that requests for the 55
