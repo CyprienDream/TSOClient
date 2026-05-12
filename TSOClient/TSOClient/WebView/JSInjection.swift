@@ -22,7 +22,7 @@ enum JSInjection {
     }
 
     private static func load(_ name: String) -> String {
-        guard let url = Bundle.main.url(forResource: name, withExtension: "js", subdirectory: "JS"),
+        guard let url = Bundle.main.url(forResource: name, withExtension: "js"),
               let src = try? String(contentsOf: url, encoding: .utf8) else {
             fatalError("Missing JS resource: \(name).js")
         }
@@ -31,7 +31,7 @@ enum JSInjection {
 
     private static func resolvePatched(_ name: String) -> String {
         var src = load(name)
-        guard let hashURL = Bundle.main.url(forResource: "collectible-hashes", withExtension: "json", subdirectory: "Data"),
+        guard let hashURL = Bundle.main.url(forResource: "collectible-hashes", withExtension: "json"),
               let hashData = try? Data(contentsOf: hashURL),
               let hashJSON = String(data: hashData, encoding: .utf8) else {
             fatalError("Missing Data resource: collectible-hashes.json")
