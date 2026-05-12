@@ -9,17 +9,6 @@ final class WebViewCoordinator: NSObject, WKUIDelegate, WKNavigationDelegate, WK
         self.router = BridgeRouter(collectibles: store, specialists: specialistsStore)
     }
 
-    func registerNotifications() {
-        NotificationCenter.default.addObserver(
-            self, selector: #selector(handleEvaluateJS(_:)),
-            name: .tsoEvaluateJS, object: nil)
-    }
-
-    @objc private func handleEvaluateJS(_ note: Notification) {
-        guard let js = note.userInfo?["js"] as? String else { return }
-        webView?.evaluateJavaScript(js, completionHandler: nil)
-    }
-
     // Open target="_blank" links inside the same view.
     func webView(_ webView: WKWebView,
                  createWebViewWith configuration: WKWebViewConfiguration,

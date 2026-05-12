@@ -5,6 +5,7 @@ struct WebView: NSViewRepresentable {
     let url: URL
     var store: CollectiblesStore
     var specialistsStore: SpecialistsStore
+    var sender: BridgeSender
 
     func makeNSView(context: Context) -> WKWebView {
         let config = WKWebViewConfiguration()
@@ -26,8 +27,7 @@ struct WebView: NSViewRepresentable {
 
         webView.isInspectable = true
         context.coordinator.webView = webView
-        context.coordinator.registerNotifications()
-        NotificationCenter.default.post(name: .tsoWebViewReady, object: webView)
+        sender.webView = webView  // Assign before any UI can trigger a dispatch.
         return webView
     }
 
