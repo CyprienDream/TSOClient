@@ -10,10 +10,6 @@ final class CollectiblesStore {
     // MARK: Collectible items
     var items: [CollectibleItem] = []
 
-    // MARK: Overlay settings (mutated by UI, read by JS via OutboundMessage)
-    var overlayEnabled: Bool = true
-    var overlayColor:   String = "#FFD700"
-
     struct CollectibleItem: Identifiable {
         let id:        Int     // gridIndex (unique within a zone)
         let x:         Int     // grid column
