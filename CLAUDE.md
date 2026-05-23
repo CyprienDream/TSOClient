@@ -9,7 +9,7 @@ A native macOS wrapper around The Settlers Online (TSO), built as an automation 
 - Building textures **are** fetched individually via `fetch()` from Ubisoft's CDN (`ubistatic-a.akamaihd.net/frontend/GFX_HASHED/building_lib/<sha1>.png`). This is how the collectible texture patcher works: it intercepts those fetches and returns a synthetic pink PNG for known collectible hashes. `<img>` elements are not used for game art.
 - `gameevents.registerHook` exposes only coarse lifecycle triggers (`triggerLevelUp`, `triggerTutorialEnd`, `triggerFriendInvite`, `triggerClientLoaded`); not useful for game-state reading.
 
-The long-term goal is a full automation suite: collectible highlighting, explorer/specialist dispatch, buffing, adventure management. The **Collectible Highlighter** shipped (via texture substitution). **Specialist Dispatch** is code-complete but not yet verified end-to-end (see `specialist-dispatch.md`).
+The long-term goal is a full automation suite: collectible highlighting, explorer/specialist dispatch, buffing, adventure management. The **Collectible Highlighter** shipped (via texture substitution). **Specialist Dispatch** is server-side end-to-end verified — the AMF3 RPC reaches GameServer, the server accepts, and specialists actually start the task. The remaining gap is that Unity's in-game UI (greyed icon + countdown bar in the star menu) only reflects the change after a zone reload; our injected `fetch` bypasses Unity's local state. See `specialist-dispatch.md` for AMF wire-format details and `log.md` for the current in-game-UI-refresh investigation.
 
 **What a collectible is:** a resource item (herbs, banner, food cart, etc.) that spawns at a random map tile on the player's island and is picked up by clicking. *Not* a building, and *not* the per-building "ready to collect" stockpile (`dPersistedPickupItemVO`). The feature mirrors what the **Pinky** Chrome extension and the Windows AIR client (`fedorovvl/tso_client`) do for the same game.
 
@@ -74,10 +74,10 @@ TSOClient/                      ← Xcode project root
 **JS → Swift (`"tso"` handler):**
 - `COLLECTIBLES` — `{mapWidth, mapHeight, items:[{gridIndex,x,y,assetName}]}`
 - `GAME_STATE`   — `{state:"LOADED"|"ZONE_CHANGED"|"ZONE_LEFT", zoneId?}`
-- `SPECIALISTS`  — `{items:[{uid,uid1,uid2,specialistType,name,level,isIdle,taskEndTime?}]}`
+- `SPECIALISTS`  — `{items:[{uid,uid1,uid2,specialistType,name,isIdle,taskEndTime?}]}`
 
 **Swift → JS (`BridgeSender.send(_:)` → `OutboundMessage.jsExpression`):**
-- `DISPATCH_SPECIALIST` — `{uid1, uid2, taskCode, targetGrid}` → handled by `amf3-encoder.js`
+- `DISPATCH_SPECIALIST` — `{uid1, uid2, actionType, taskCode, targetGrid}` → handled by `amf3-encoder.js`
 
 ## Highlighting approach
 
@@ -116,7 +116,9 @@ The canvas overlay approach was abandoned in Iteration 7 because Unity renders v
 
 ## What does NOT exist yet
 
-- Specialist dispatch verified end-to-end (code complete — see `specialist-dispatch.md`; needs live testing).
+- **In-game UI refresh on injected dispatch** — Unity's specialist icon doesn't grey out / show its countdown bar until a zone reload, because our `fetch` bypasses Unity's local state. Investigation plan in `log.md`.
+- Task countdown timer in our own panel — `collectedTime` is a game-internal clock; conversion to real time is unknown.
+- General dispatch auto-populated with `garrisonBuildingGridPos` (user must enter grid manually for now).
 - Buff management, adventure features, trading, building automation.
 - Persistent storage of dispatch templates or any app settings.
 - Unit or UI tests.
