@@ -171,7 +171,15 @@
 
     // ── _TSORPC namespace ─────────────────────────────────────────────────
 
-    var _counter = 1;
+    var _counterOffset = 0;  // increments each dispatch to stay distinct within a session
+
+    function nextCounter() {
+        _counterOffset++;
+        // Mirror the game's sequence: game's last known counter + our own offset.
+        // Falls back to 1000+ if no game requests seen yet.
+        var base = window._tsoLastSeq || 999;
+        return base + _counterOffset;
+    }
 
     function getRealmUrl() {
         return window._tsoRealmUrl || null;
@@ -192,12 +200,13 @@
         var url = getRealmUrl();
         if (!url) return Promise.reject(new Error('_TSORPC: realm URL not yet discovered'));
         var w = new AMFWriter();
-        w.envelope('null', '/' + (_counter++), argsArray);
+        var seq = nextCounter();
+        w.envelope('null', '/' + seq, argsArray);
         var buf = w.toBuffer();
-        webkit.messageHandlers.logger.postMessage('[AMF3:out] POST bytes=' + buf.byteLength);
+        webkit.messageHandlers.logger.postMessage('[AMF3:rpc] POST seq=/' + seq + ' url=' + url.slice(0, 120) + ' bytes=' + buf.byteLength);
         return fetch(url, {
             method: 'POST',
-            credentials: 'include',
+            credentials: 'omit',
             headers: { 'Content-Type': 'application/x-amf' },
             body: buf,
         }).then(function(resp) {
@@ -247,7 +256,7 @@
         };
         var action = {
             __class:  'defaultGame.Communication.VO.dServerAction',
-            type:     0,
+            type:     (opts.actionType !== undefined ? opts.actionType : 0) | 0,
             grid:     grid,
             endGrid:  endGrid,
             data:     taskVO,
@@ -284,10 +293,21 @@
         };
 
         webkit.messageHandlers.logger.postMessage(
-            '[_TSORPC] dispatchSpecialist uid=' + uid1 + ':' + uid2 +
-            ' subTaskID=' + subTaskID + ' zone=' + ctx.zoneID);
+            '[_TSORPC] dispatch uid=' + uid1 + ':' + uid2 +
+            ' actionType=' + action.type + ' subTaskID=' + subTaskID +
+            ' zone=' + ctx.zoneID + ' DSId=' + (ctx.DSId || '?').slice(0, 16) +
+            ' clientID=' + ctx.dsoAuthRandomClientID +
+            ' url=' + (getRealmUrl() || '?').slice(0, 80));
 
-        return sendAMF([msg]).then(function(result) {
+        // Mark this as our own dispatch so learnSpecialistTypes skips it.
+        window._tsoOwnDispatch = uid1 + ':' + uid2;
+        return sendAMF([msg]).then(function(r) {
+            window._tsoOwnDispatch = null;
+            return r;
+        }, function(e) {
+            window._tsoOwnDispatch = null;
+            return Promise.reject(e);
+        }).then(function(result) {
             webkit.messageHandlers.logger.postMessage(
                 '[_TSORPC] ack: ' + JSON.stringify(result));
         }).catch(function(e) {
@@ -308,5 +328,4 @@
         });
     }
 
-    webkit.messageHandlers.logger.postMessage('[AMF3Encoder] ready');
 })();

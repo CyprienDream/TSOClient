@@ -367,7 +367,9 @@
             if (!ctx.exemplars[v.__class]) ctx.exemplars[v.__class] = v;
             if (v.__class.split('.').pop() === 'dBuildingVO') ctx.allBuildings.push(v);
             if (v.__class.split('.').pop() === 'DestructBuildingResultVO') ctx.destructed.push(v);
-            if (v.__class.split('.').pop() === 'dSpecialistVO') ctx.specialists.push(v);
+            if (v.__class.split('.').pop() === 'dSpecialistVO') {
+                ctx.specialists.push(v);
+            }
             if (isCollectibleBuilding(v)) {
                 ctx.items.push(v);
                 ctx.itemParents.push(parent);
@@ -419,6 +421,74 @@
 
     function shortClass(c) { return c ? c.split('.').pop() : '?'; }
 
+    // Derive specialist type from the task VO class name — most reliable when busy.
+    // FindDepositVO → Geologist. FindTreasureVO / FindEventZoneVO → Explorer.
+    function _classifyFromTask(taskObj) {
+        if (!taskObj || !taskObj.__class) return null;
+        var c = taskObj.__class;
+        if (c.indexOf('FindDeposit') >= 0)   return 'Geologist';
+        if (c.indexOf('FindTreasure') >= 0 ||
+            c.indexOf('FindEventZone') >= 0)  return 'Explorer';
+        return null;
+    }
+
+    // Classify specialist type.
+    // Priority: garrison check → numeric specialistType → name fallback.
+    // garrisonPos >= 0 is the authoritative General indicator (all Generals have a
+    // garrison grid position; all Explorers/Geologists have -1).
+    // armyVO is present on EVERY dSpecialistVO and carries no type signal.
+    // Numeric mapping observed from live data: 0=General, 1=Explorer, 2=Geologist.
+    // Premium variants have higher numeric IDs; those are handled by task class or hints.
+    function _classifySpec(t, garrisonPos, name) {
+        if (garrisonPos >= 0) return 'General';
+        if (t === 0) return 'General';
+        if (t === 1) return 'Explorer';
+        if (t === 2) return 'Geologist';
+        if (t === 3) return 'General';
+        var n = (name || '').toLowerCase();
+        if (n.indexOf('geolog') >= 0)  return 'Geologist';
+        if (n.indexOf('explor') >= 0)  return 'Explorer';
+        if (n.indexOf('general') >= 0) return 'General';
+        return 'Unknown';
+    }
+
+    // Build uid→type hints from the game's own outbound type=95 dispatches.
+    // actionType 0 → Geologist, 1/2 → Explorer, 12 → General.
+    // Stored in window._tsoSpecTypeHints so it persists across specialist list updates.
+    function learnSpecialistTypes(bodies) {
+        try {
+            for (var i = 0; i < bodies.length; i++) {
+                var val = bodies[i].value;
+                if (!Array.isArray(val)) continue;
+                for (var j = 0; j < val.length; j++) {
+                    var rmsg = val[j];
+                    if (!rmsg || !rmsg.body) continue;
+                    var bodyArr = rmsg.body;
+                    if (!Array.isArray(bodyArr)) continue;
+                    for (var k = 0; k < bodyArr.length; k++) {
+                        var call = bodyArr[k];
+                        if (!call || call.type !== 95 || !call.data) continue;
+                        var action = call.data;
+                        var taskData = action.data;
+                        if (!taskData || !taskData.uniqueID) continue;
+                        var uid1 = taskData.uniqueID.uniqueID1;
+                        var uid2 = taskData.uniqueID.uniqueID2;
+                        var uk = uid1 + ':' + uid2;
+                        var aType = action.type;
+                        var hint = aType === 0 ? 'Geologist'
+                                 : (aType === 1 || aType === 2) ? 'Explorer'
+                                 : aType === 12 ? 'General'
+                                 : null;
+                        if (hint && uk !== window._tsoOwnDispatch) {
+                            if (!window._tsoSpecTypeHints) window._tsoSpecTypeHints = {};
+                            window._tsoSpecTypeHints[uk] = hint;
+                        }
+                    }
+                }
+            }
+        } catch (_) {}
+    }
+
     function buildResult(ctx) {
         var map = ctx.maps[0] || { w: _cachedMapWidth, h: _cachedMapHeight };
         if (map.w > 0) { _cachedMapWidth = map.w; _cachedMapHeight = map.h; }
@@ -461,24 +531,12 @@
         return { mapWidth: map.w, mapHeight: map.h, items: items };
     }
 
-    // Cross-call dedup: only log info that's NEW since the last call.
-    // SEEN_CLASSES = full class names ever observed.
-    // SEEN_ZONE_ARRAYS = dZoneVO array fields ever observed (key shapes).
-    // LAST_PICKUP_COUNT = last numberOfGeneratedPickups value to spot changes.
-    // LAST_BUILDING_COUNT = last dBuildingVO total to spot pickups/destructs.
-    var SEEN_CLASSES = {};
-    var SEEN_ZONE_ARRAYS = {};
-    var LAST_PICKUP_COUNT = -1;
-    var LAST_BUILDING_COUNT = -1;
-
     var _cachedMapWidth  = 0, _cachedMapHeight = 0;  // retained across pickup responses
     var _prevCollectibles = null;  // null until first zone-load; {gridIndex→item} thereafter
 
     // ── Analyze one AMF3 buffer ─────────────────────────────────────────
-    // Called by both fetch and XHR interceptors. Quiet by default — logs
-    // only when something new appears: previously-unseen classes, new
-    // dZoneVO arrays, a change in numberOfGeneratedPickups, size-finder
-    // hits, or successful pickup extraction.
+    // Called by both fetch and XHR interceptors. Extracts collectibles and
+    // specialists from the response; logs type=95 acks and parse errors.
     function analyzeAMFBuffer(buf, channel) {
         var parser = new AMFParser(buf);
         var ctx = newCtx();
@@ -487,7 +545,27 @@
         try {
             var bodies = parser.parseEnvelope();
             parsed = true;
-            for (var i = 0; i < bodies.length; i++) scanTree(bodies[i].value, 0, ctx);
+            for (var i = 0; i < bodies.length; i++) {
+                scanTree(bodies[i].value, 0, ctx);
+                // Log acks for type=95 specialist dispatch commands so we can compare
+                // game-initiated acks vs our own acks side by side.
+                (function(val) {
+                    var msgs = Array.isArray(val) ? val : (val ? [val] : []);
+                    msgs.forEach(function(msg) {
+                        if (!msg) return;
+                        var body = msg.body;
+                        if (!body) return;
+                        var sr = (body.__class && body.__class.indexOf('dServerResponse') >= 0) ? body : null;
+                        if (!sr && body.data && body.data.__class && body.data.__class.indexOf('dServerResponse') >= 0) sr = body.data;
+                        if (sr && sr.type === 95) {
+                            webkit.messageHandlers.logger.postMessage(
+                                '[AMF3:' + channel + '] type=95 ack errorCode=' +
+                                (sr.data && sr.data.errorCode) + ' full=' +
+                                JSON.stringify(sr, null, 2).slice(0, 1500));
+                        }
+                    });
+                })(bodies[i].value);
+            }
         } catch (e) {
             try {
                 var rp = new AMFParser(buf);
@@ -501,76 +579,6 @@
             }
         }
         if (!parsed) return;
-
-        // Only log classes never seen before across the whole session.
-        var newClasses = [];
-        Object.keys(ctx.classes).forEach(function(c) {
-            if (!SEEN_CLASSES[c]) {
-                SEEN_CLASSES[c] = true;
-                newClasses.push(shortClass(c) + 'x' + ctx.classes[c]);
-            }
-        });
-        if (newClasses.length) {
-            webkit.messageHandlers.logger.postMessage(
-                '[AMF3:' + channel + '] new classes: ' + newClasses.sort().join(', ')
-            );
-        }
-
-        // dBuildingVO total — pick up/destruct events make this decrement;
-        // useful sanity signal that a response carried a building delta.
-        var bldgCount = 0;
-        Object.keys(ctx.classes).forEach(function(c) {
-            if (shortClass(c) === 'dBuildingVO') bldgCount = ctx.classes[c];
-        });
-        if (bldgCount > 0 && bldgCount !== LAST_BUILDING_COUNT) {
-            webkit.messageHandlers.logger.postMessage(
-                '[AMF3:' + channel + '] dBuildingVO count: ' +
-                LAST_BUILDING_COUNT + ' → ' + bldgCount
-            );
-            LAST_BUILDING_COUNT = bldgCount;
-        }
-
-        var zoneKey = Object.keys(ctx.exemplars).find(function(k) {
-            return k.endsWith('dZoneVO');
-        });
-        if (zoneKey) {
-            var zone = ctx.exemplars[zoneKey];
-
-            // New dZoneVO array fields only (keyed by name+length+sample).
-            var newArrFields = [];
-            Object.keys(zone).forEach(function(k) {
-                var f = zone[k];
-                if (!f || typeof f !== 'object') return;
-                var arr = Array.isArray(f) ? f
-                        : (f.source && Array.isArray(f.source) ? f.source : null);
-                if (!arr) return;
-                var sample = arr.length > 0 && arr[0] && arr[0].__class
-                             ? '<' + arr[0].__class.split('.').pop() + '>' : '';
-                var sig = k + '[' + arr.length + ']' + sample;
-                if (!SEEN_ZONE_ARRAYS[sig]) {
-                    SEEN_ZONE_ARRAYS[sig] = true;
-                    newArrFields.push(sig);
-                }
-            });
-            if (newArrFields.length) {
-                webkit.messageHandlers.logger.postMessage(
-                    '[AMF3:' + channel + '] new dZoneVO arrays: ' + newArrFields.join(', ')
-                );
-            }
-
-            // Pickup-count change is the strongest signal that a spawn/despawn
-            // happened. Always log on change; quiet otherwise.
-            var pickupCount = (zone.pickupsDataVO && typeof zone.pickupsDataVO === 'object')
-                              ? (zone.pickupsDataVO.numberOfGeneratedPickups | 0) : 0;
-            if (pickupCount !== LAST_PICKUP_COUNT) {
-                webkit.messageHandlers.logger.postMessage(
-                    '[AMF3:' + channel + '] numberOfGeneratedPickups: ' +
-                    LAST_PICKUP_COUNT + ' → ' + pickupCount
-                );
-                LAST_PICKUP_COUNT = pickupCount;
-            }
-
-        }
 
         // Skip responses that carry no game-world data at all.
         // Settings/auth have none of these; destruct-only pickup responses have ctx.destructed.
@@ -586,22 +594,18 @@
 
             // Try to extract a grid position from the VO or one level of nested objects.
             var dgi = detectPosition(d0);
-            var dSrc = 'direct';
             if (dgi < 0) {
                 var dks = Object.keys(d0);
                 for (var dki = 0; dki < dks.length && dgi < 0; dki++) {
                     var dkv = d0[dks[dki]];
                     if (dkv && typeof dkv === 'object' && !Array.isArray(dkv)) {
                         var dnested = detectPosition(dkv);
-                        if (dnested >= 0) { dgi = dnested; dSrc = dks[dki]; }
+                        if (dnested >= 0) dgi = dnested;
                     }
                 }
             }
 
             if (dgi >= 0 && _cachedMapWidth > 0) {
-                var dgx = dgi % _cachedMapWidth, dgy = Math.floor(dgi / _cachedMapWidth);
-                webkit.messageHandlers.logger.postMessage(
-                    '[AMF3:' + channel + '] Destruct grid(' + dgx + ',' + dgy + ') gi=' + dgi + ' via ' + dSrc);
                 var dKey = String(dgi);
                 if (_prevCollectibles !== null && _prevCollectibles[dKey]) {
                     var updated = {};
@@ -609,14 +613,7 @@
                         if (k !== dKey) updated[k] = _prevCollectibles[k];
                     });
                     _prevCollectibles = updated;
-                } else {
-                    webkit.messageHandlers.logger.postMessage(
-                        '[AMF3:' + channel + '] Destruct gi=' + dgi +
-                        ' not in prevCollectibles keys=[' + (_prevCollectibles ? Object.keys(_prevCollectibles).join(',') : 'null') + ']');
                 }
-            } else {
-                webkit.messageHandlers.logger.postMessage(
-                    '[AMF3:' + channel + '] Destruct: no position field found');
             }
             return;
         }
@@ -641,70 +638,63 @@
                 var parts = uk.split(':');
                 var u1 = parseInt(parts[0], 10);
                 var u2 = parseInt(parts[1], 10);
-                // taskEndTime: look for common field names; may be Date or numeric ms
-                var endTime = null;
-                var tet = sp.taskEndTime || sp.finishTime || sp.endTime || sp.taskFinishTime;
-                if (tet instanceof Date) endTime = tet.getTime();
-                else if (typeof tet === 'number' && tet > 0) endTime = tet;
+                var taskObj = (sp.task != null) ? sp.task : null;
+                var taskEnd = null;
+                if (taskObj && typeof taskObj === 'object') {
+                    var tf = taskObj.endTime || taskObj.finishTime || taskObj.timeToFinish || taskObj.taskEndTime;
+                    if (tf instanceof Date) taskEnd = tf.getTime();
+                    else if (typeof tf === 'number' && tf > 0) taskEnd = tf;
+                }
+                var taskTypeHint = _classifyFromTask(taskObj);
+                // Persist task-derived type into hints so idle specialists are still
+                // correctly classified on the next zone load (when task will be null).
+                if (taskTypeHint) {
+                    if (!window._tsoSpecTypeHints) window._tsoSpecTypeHints = {};
+                    window._tsoSpecTypeHints[uk] = taskTypeHint;
+                }
+                var hints = window._tsoSpecTypeHints;
+                var spType = (hints && hints[uk])
+                    || taskTypeHint
+                    || _classifySpec(sp.specialistType, sp.garrisonBuildingGridPos | 0, sp.name_string);
                 specItems.push({
                     uid: uk,
                     uid1: u1,
                     uid2: u2,
-                    specialistType: sp.specialistType || sp.type || sp.specialistTypeID || 'Unknown',
-                    name: sp.name || sp.specialistName || '',
-                    level: sp.level || sp.skillLevel || 1,
-                    isIdle: !sp.currentTask && !sp.task && endTime === null,
-                    taskEndTime: endTime,
+                    specialistType: spType,
+                    name: sp.name_string || '',
+                    isIdle: taskObj === null,
+                    taskEndTime: taskEnd,
                 });
             }
             if (specItems.length > 0) {
+                window._tsoSpecialists = specItems;
                 window._tsoSend('SPECIALISTS', { items: specItems });
                 webkit.messageHandlers.logger.postMessage(
                     '[AMF3:' + channel + '] specialists=' + specItems.length);
             }
         }
 
-        // ── Pickup detection → calibration anchor ─────────────────────────
-        // Compare current collectible set with previous. Exactly one disappearing
-        // means a pickup; more disappearing means a zone change or bulk update.
-        // We do NOT gate on ctx.maps.length because pickup responses can include
-        // zone data (causing the old branch to treat them as zone-loads and skip
-        // the diff entirely).
+        // Track current collectible set so DestructBuildingResultVO can remove the right entry.
         var currentSet = {};
         result.items.forEach(function(it) { currentSet[it.gridIndex] = it; });
-
         _prevCollectibles = currentSet;
-
-        webkit.messageHandlers.logger.postMessage(
-            '[AMF3:' + channel + '] map=' + result.mapWidth + 'x' + result.mapHeight +
-            ' pickups=' + result.items.length
-        );
     }
 
     // ── Fetch interception ──────────────────────────────────────────────
     var origFetch = window.fetch;
-    var _urlsSeen = {};
     window.fetch = function(input, init) {
         var url = typeof input === 'string' ? input : (input && input.url) || '';
 
-        // One-shot URL log: first 20 unique game-server endpoints (skip static CDN assets).
-        var isGameEndpoint = url.includes('thesettlersonline.com') &&
-                             !url.includes('/frontend/') &&
-                             !url.includes('/GFX_HASHED/');
-        if (isGameEndpoint && Object.keys(_urlsSeen).length < 20 && !_urlsSeen[url]) {
-            _urlsSeen[url] = true;
-            webkit.messageHandlers.logger.postMessage('[AMF3:url] ' + url.slice(0, 120));
-        }
-
-        // ── Outbound body capture (Phase 1) ──────────────────────────────
         var isPost = init && (init.method || '').toUpperCase() === 'POST';
         if (url.includes('GameServer') && isPost && init.body) {
             captureOutboundBody(init.body, 'fetch');
         }
-        // Store realm URL for _TSORPC to discover automatically.
-        if (url.includes('GameServer/amf') && !window._tsoRealmUrl) {
-            window._tsoRealmUrl = url;
-            webkit.messageHandlers.logger.postMessage('[AMF3:url] realm cached: ' + url.slice(0, 100));
+        // Always update realm URL so zone-shard changes are picked up automatically.
+        if (url.includes('GameServer/amf')) {
+            if (window._tsoRealmUrl !== url) {
+                window._tsoRealmUrl = url;
+                webkit.messageHandlers.logger.postMessage('[AMF3:url] realm updated: ' + url.slice(0, 120));
+            }
         }
 
         return origFetch.apply(this, arguments).then(function(response) {
@@ -741,6 +731,10 @@
                         var call = bodyArr[k];
                         if (!call || !call.__class || call.__class.indexOf('dServerCall') < 0) continue;
                         var prev = window._tsoAuthCtx;
+                        // Track the game's outbound response counter so _TSORPC can
+                        // continue the sequence rather than resetting to /1.
+                        var seq = parseInt((bodies[i] && bodies[i].response || '/0').slice(1), 10);
+                        if (seq > 0) window._tsoLastSeq = seq;
                         window._tsoAuthCtx = {
                             dsoAuthToken:          call.dsoAuthToken,
                             dsoAuthRandomClientID: call.dsoAuthRandomClientID,
@@ -761,44 +755,21 @@
     }
 
     // ── Outbound body capture helper ────────────────────────────────────
+    // Parses outbound AMF envelopes to refresh auth context and learn specialist types.
     function captureOutboundBody(body, channel) {
-        function logBuf(buf) {
+        function processBuf(buf) {
             try {
-                var u8 = new Uint8Array(buf);
-                // Hex dump first 512 bytes.
-                var hex = '';
-                var limit = Math.min(u8.length, 512);
-                for (var i = 0; i < limit; i++) {
-                    hex += ('0' + u8[i].toString(16)).slice(-2);
-                    if ((i + 1) % 16 === 0) hex += '\n';
-                    else hex += ' ';
-                }
-                webkit.messageHandlers.logger.postMessage(
-                    '[AMF3:out:hex] len=' + u8.length + '\n' + hex.trim());
-                // Parse as AMF3 envelope and pretty-print the tree.
-                try {
-                    var p = new AMFParser(buf);
-                    var bodies = p.parseEnvelope();
-                    webkit.messageHandlers.logger.postMessage(
-                        '[AMF3:out] envelope target=' + (bodies[0] ? bodies[0].target : '?') +
-                        ' response=' + (bodies[0] ? bodies[0].response : '?') +
-                        ' tree=' + JSON.stringify(bodies, replacer, 2).slice(0, 2000));
-                    cacheAuthCtx(bodies);
-                } catch (pe) {
-                    webkit.messageHandlers.logger.postMessage('[AMF3:out] parse fail: ' + pe.message);
-                }
+                var p = new AMFParser(buf);
+                var bodies = p.parseEnvelope();
+                cacheAuthCtx(bodies);
+                learnSpecialistTypes(bodies);
             } catch (e) {
                 webkit.messageHandlers.logger.postMessage('[AMF3:out] capture error: ' + e);
             }
         }
-        function replacer(k, v) {
-            if (v instanceof Uint8Array) return '<ByteArray len=' + v.length + '>';
-            if (v instanceof ArrayBuffer) return '<ArrayBuffer len=' + v.byteLength + '>';
-            return v;
-        }
-        if (body instanceof ArrayBuffer) { logBuf(body); return; }
-        if (body instanceof Uint8Array)  { logBuf(body.buffer.slice(body.byteOffset, body.byteOffset + body.byteLength)); return; }
-        if (body instanceof Blob) { body.arrayBuffer().then(logBuf).catch(function(){}); return; }
+        if (body instanceof ArrayBuffer) { processBuf(body); return; }
+        if (body instanceof Uint8Array)  { processBuf(body.buffer.slice(body.byteOffset, body.byteOffset + body.byteLength)); return; }
+        if (body instanceof Blob) { body.arrayBuffer().then(processBuf).catch(function(){}); return; }
     }
 
     // ── XHR interception ────────────────────────────────────────────────
@@ -811,10 +782,7 @@
     XMLHttpRequest.prototype.open = function(method, url) {
         this._tsoUrl = url || '';
         this._tsoMethod = (method || '').toUpperCase();
-        // Cache realm URL from first observed GameServer request.
-        if (url && url.includes('GameServer/amf') && !window._tsoRealmUrl) {
-            window._tsoRealmUrl = url;
-        }
+        if (url && url.includes('GameServer/amf')) window._tsoRealmUrl = url;
         return origOpen.apply(this, arguments);
     };
     XMLHttpRequest.prototype.send = function(body) {

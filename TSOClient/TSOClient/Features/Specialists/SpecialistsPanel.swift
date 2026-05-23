@@ -3,11 +3,11 @@ import Combine
 
 struct SpecialistsPanel: View {
     var store: SpecialistsStore
-    var onDispatch: (Int, Int, Int, Int) -> Void  // uid1, uid2, subTaskID, targetGrid
+    var onDispatch: (Int, Int, TaskCode, Int) -> Void  // uid1, uid2, taskCode, targetGrid
 
     @State private var filter: String = "All"
-    @State private var selectedTasks: [String: Int] = [:]   // specialist id → task code
-    @State private var selectedGrids: [String: Int] = [:]   // specialist id → target grid
+    @State private var selectedTasks: [String: TaskCode] = [:]
+    @State private var selectedGrids: [String: Int] = [:]
 
     private let filters = ["All", "Geologist", "Explorer", "General"]
 
@@ -41,8 +41,8 @@ struct SpecialistsPanel: View {
                             get: { selectedGrids[spec.id] ?? 0 },
                             set: { selectedGrids[spec.id] = $0 }
                         ),
-                        onDispatch: { subTaskID, targetGrid in
-                            onDispatch(spec.uid1, spec.uid2, subTaskID, targetGrid)
+                        onDispatch: { tc, grid in
+                            onDispatch(spec.uid1, spec.uid2, tc, grid)
                         }
                     )
                 }
@@ -72,38 +72,37 @@ struct SpecialistsPanel: View {
         .padding(.vertical, 6)
     }
 
-    private func defaultTask(for spec: SpecialistsStore.SpecialistItem) -> Int {
-        if spec.specialistType.contains("Geologist") { return GeologistTask.findCoal.rawValue }
-        if spec.specialistType.contains("Explorer")  { return ExplorerTask.findTreasure.rawValue }
-        return 0
+    private func defaultTask(for spec: SpecialistsStore.SpecialistItem) -> TaskCode {
+        if spec.specialistType.contains("Geologist") { return GeologistTask.findStone.taskCode }
+        if spec.specialistType.contains("Explorer")  { return ExplorerTask.treasureShort.taskCode }
+        return generalStarMenuCode
     }
 }
 
 struct SpecialistRow: View {
     let spec: SpecialistsStore.SpecialistItem
-    @Binding var taskCode: Int
+    @Binding var taskCode: TaskCode
     @Binding var targetGrid: Int
-    var onDispatch: (Int, Int) -> Void
+    var onDispatch: (TaskCode, Int) -> Void
 
     @State private var now = Date()
+    @State private var gridText: String = "0"
     private let timer = Timer.publish(every: 1, on: .main, in: .common).autoconnect()
 
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
             HStack {
                 VStack(alignment: .leading, spacing: 2) {
-                    Text(spec.name.isEmpty ? "Specialist" : spec.name)
+                    Text(spec.name.isEmpty ? spec.specialistType : spec.name)
                         .font(.subheadline).bold()
-                    Text("\(spec.specialistType) · Lv \(spec.level)")
+                    Text(spec.specialistType)
                         .font(.caption).foregroundStyle(.secondary)
                 }
                 Spacer()
                 statusBadge
             }
 
-            if spec.isIdle {
-                taskControls
-            }
+            taskControls
         }
         .padding(.vertical, 4)
         .onReceive(timer) { now = $0 }
@@ -132,7 +131,7 @@ struct SpecialistRow: View {
             HStack {
                 Picker("Task", selection: $taskCode) {
                     ForEach(GeologistTask.allCases) { t in
-                        Text(t.label).tag(t.rawValue)
+                        Text(t.label).tag(t.taskCode)
                     }
                 }
                 .labelsHidden()
@@ -143,20 +142,36 @@ struct SpecialistRow: View {
             HStack {
                 Picker("Task", selection: $taskCode) {
                     ForEach(ExplorerTask.allCases) { t in
-                        Text(t.label).tag(t.rawValue)
+                        Text(t.label).tag(t.taskCode)
                     }
                 }
                 .labelsHidden()
                 .frame(maxWidth: .infinity)
                 dispatchButton
             }
-        } else {
-            HStack {
-                Text("Task \(taskCode)")
-                    .font(.caption).foregroundStyle(.secondary)
-                Spacer()
-                dispatchButton
+        } else if spec.specialistType.contains("General") {
+            VStack(alignment: .leading, spacing: 4) {
+                HStack {
+                    Text("Grid:")
+                        .font(.caption).foregroundStyle(.secondary)
+                    TextField("0", text: $gridText)
+                        .textFieldStyle(.roundedBorder)
+                        .frame(width: 60)
+                        .font(.caption)
+                        .onChange(of: gridText) { _, v in
+                            targetGrid = Int(v) ?? 0
+                        }
+                    Spacer()
+                    Button("Send to Star") {
+                        onDispatch(generalStarMenuCode, targetGrid)
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .controlSize(.small)
+                }
             }
+        } else {
+            Text("Unknown type '\(spec.specialistType)' — reload zone to repopulate.")
+                .font(.caption).foregroundStyle(.secondary)
         }
     }
 

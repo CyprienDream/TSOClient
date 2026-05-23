@@ -13,10 +13,12 @@ struct ContentView: View {
                     sender: sender)
                 .frame(minWidth: 800, minHeight: 768)
 
-            SpecialistsPanel(store: specialistsStore) { uid1, uid2, subTaskID, targetGrid in
+            SpecialistsPanel(store: specialistsStore) { uid1, uid2, taskCode, targetGrid in
                 sender.send(.dispatchSpecialist(
                     uid1: uid1, uid2: uid2,
-                    subTaskID: subTaskID, targetGrid: targetGrid))
+                    actionType: taskCode.actionType,
+                    subTaskID: taskCode.subTaskID,
+                    targetGrid: targetGrid))
             }
         }
         .frame(minWidth: 1100, minHeight: 768)

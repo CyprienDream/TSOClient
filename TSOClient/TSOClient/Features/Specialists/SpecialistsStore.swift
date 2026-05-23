@@ -10,7 +10,6 @@ final class SpecialistsStore {
         let uid2: Int
         let specialistType: String
         let name: String
-        let level: Int
         let isIdle: Bool
         let taskEndTime: Double?
     }
@@ -23,7 +22,6 @@ final class SpecialistsStore {
                 uid2: $0.uid2,
                 specialistType: $0.specialistType,
                 name: $0.name,
-                level: $0.level,
                 isIdle: $0.isIdle,
                 taskEndTime: $0.taskEndTime
             )

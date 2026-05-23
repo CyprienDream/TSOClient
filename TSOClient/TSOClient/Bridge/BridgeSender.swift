@@ -6,6 +6,10 @@ final class BridgeSender {
     weak var webView: WKWebView?
 
     func send(_ msg: OutboundMessage) {
-        webView.map(msg.send(to:))
+        guard let webView else {
+            print("[BridgeSender] webView is nil — message dropped")
+            return
+        }
+        msg.send(to: webView)
     }
 }

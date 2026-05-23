@@ -70,20 +70,8 @@
             get: function(t, p) {
                 // ── Intercepted methods ──────────────────────────────────────
                 if (p === 'open') return function(method, url) {
-                    // Diagnostic: log every building_lib URL to confirm XHR is used + URL shape.
-                    if (typeof url === 'string' && url.indexOf('building_lib') >= 0) {
-                        var hm = url.match(/\/building_lib\/([a-f0-9]{40})\.png/i);
-                        webkit.messageHandlers.logger.postMessage(
-                            '[Patcher] xhr-saw building_lib hash=' + (hm ? hm[1] : '?') +
-                            ' matched=' + !!(hm && HASHES.has(hm[1])) +
-                            ' url=' + url.slice(0, 140));
-                    }
                     intercept = isCollectible(url);
-                    if (intercept) {
-                        webkit.messageHandlers.logger.postMessage(
-                            '[Patcher] xhr intercept ' + url.slice(url.lastIndexOf('/') + 1, -4));
-                        return;   // don't open the native XHR
-                    }
+                    if (intercept) return;   // don't open the native XHR
                     return t.open.apply(t, arguments);
                 };
 
@@ -171,17 +159,7 @@
     window.fetch = function(input, init) {
         var url = typeof input === 'string' ? input
                 : (input && typeof input.url === 'string' ? input.url : '');
-        // Diagnostic: log every building_lib URL seen via fetch.
-        if (url.indexOf('building_lib') >= 0) {
-            var fm = url.match(/\/building_lib\/([a-f0-9]{40})\.png/i);
-            webkit.messageHandlers.logger.postMessage(
-                '[Patcher] fetch-saw building_lib hash=' + (fm ? fm[1] : '?') +
-                ' matched=' + !!(fm && HASHES.has(fm[1])) +
-                ' url=' + url.slice(0, 140));
-        }
         if (isCollectible(url)) {
-            webkit.messageHandlers.logger.postMessage(
-                '[Patcher] fetch intercept ' + url.slice(url.lastIndexOf('/') + 1, -4));
             var buf = pinkBuffer();
             return Promise.resolve(new Response(buf, {
                 status: 200,
@@ -191,7 +169,4 @@
         }
         return origFetch.apply(this, arguments);
     };
-
-    webkit.messageHandlers.logger.postMessage(
-        '[CollectiblePatcher] ready — ' + HASHES.size + ' hashes');
 })();

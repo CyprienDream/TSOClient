@@ -33,7 +33,6 @@ enum InboundMessage {
             let uid2: Int
             let specialistType: String
             let name: String
-            let level: Int
             let isIdle: Bool
             let taskEndTime: Double?
         }
@@ -89,7 +88,6 @@ enum InboundMessage {
                 uid2:           uid2,
                 specialistType: s["specialistType"] as? String ?? "Unknown",
                 name:           s["name"]           as? String ?? "",
-                level:          s["level"]          as? Int    ?? 1,
                 isIdle:         s["isIdle"]         as? Bool   ?? true,
                 taskEndTime:    s["taskEndTime"]     as? Double
             )

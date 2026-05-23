@@ -17,7 +17,6 @@ final class BridgeRouter {
         switch msg {
         case .collectibles(let payload):
             collectibles.apply(payload)
-            print("[TSO] Collectibles received: \(payload.items.count) items on \(payload.mapWidth)×\(payload.mapHeight) map")
         case .gameState(let payload):
             print("[TSO] Game state: \(payload.state) zoneId=\(payload.zoneId.map(String.init) ?? "nil")")
             if payload.state == "ZONE_LEFT" {
