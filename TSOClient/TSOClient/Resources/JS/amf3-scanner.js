@@ -365,10 +365,19 @@
         if (v.__class) {
             ctx.classes[v.__class] = (ctx.classes[v.__class] || 0) + 1;
             if (!ctx.exemplars[v.__class]) ctx.exemplars[v.__class] = v;
-            if (v.__class.split('.').pop() === 'dBuildingVO') ctx.allBuildings.push(v);
-            if (v.__class.split('.').pop() === 'DestructBuildingResultVO') ctx.destructed.push(v);
-            if (v.__class.split('.').pop() === 'dSpecialistVO') {
-                ctx.specialists.push(v);
+            var shortCls = v.__class.split('.').pop();
+            if (shortCls === 'dBuildingVO') ctx.allBuildings.push(v);
+            if (shortCls === 'DestructBuildingResultVO') ctx.destructed.push(v);
+            if (shortCls === 'dSpecialistVO') ctx.specialists.push(v);
+            // dServerActionResult.clientTime is the server-clock double, returned
+            // in every response envelope. Snapshot the latest into ctx for the
+            // SPECIALISTS payload; used as the reference for collectedTime conversion.
+            if (shortCls === 'dServerActionResult' && typeof v.clientTime === 'number') {
+                ctx.serverClock = v.clientTime;
+            }
+            // dPlayerVO.playerLevel arrives on zone load via dZoneVO.playersOnMap[0].
+            if (shortCls === 'dPlayerVO' && typeof v.playerLevel === 'number') {
+                ctx.playerLevel = v.playerLevel;
             }
             if (isCollectibleBuilding(v)) {
                 ctx.items.push(v);
@@ -416,6 +425,8 @@
             allBuildings: [],    // every dBuildingVO, for calibration data export
             destructed:   [],    // DestructBuildingResultVO instances (pickup events)
             specialists:  [],    // dSpecialistVO instances
+            serverClock:  null,  // dServerActionResult.clientTime (most recent in this response)
+            playerLevel:  null,  // dPlayerVO.playerLevel (set on zone-load responses)
         };
     }
 
@@ -432,24 +443,56 @@
         return null;
     }
 
+    // Numeric specialistType → canonical subtype name. Sourced from fedorovvl/
+    // tso_explorer_manager Loca.cs (explorers / geologists dictionaries).
+    var EXPLORER_TYPES = {
+        1: 'Explorer', 4: 'MasterExplorer', 10: 'EasterExplorer', 17: 'FastLuckyExplorer',
+        28: 'IntrepidExplorer', 32: 'CorageousExplorer', 39: 'CandidExplorer',
+        41: 'LovelyExplorer', 44: 'PrincessZoeExplorer', 46: 'Soccer2019Explorer',
+        48: 'EmphaticExplorer', 51: 'BewitchingExplorer', 53: 'HumbleExplorer',
+        55: 'KeenerExplorer', 58: 'BoldExplorer', 61: 'ScaredExplorer',
+        65: 'SnowyExplorer', 66: 'RomanticExplorer', 68: 'MotherlyExplorer',
+        69: 'BenevolentExplorer', 70: 'RoyalExplorer', 74: 'PirateExplorer',
+        78: 'FluffyButteExplorer',
+    };
+    var GEOLOGIST_TYPES = {
+        2: 'Geologist', 5: 'MasterGeologist', 26: 'ConscientiousGeologist',
+        34: 'IronWilledGeologist', 35: 'StoneColdGeologist', 38: 'VersedGeologist',
+        40: 'LovelyGeologist', 42: 'GoldheartedGeologist', 45: 'ArcheologistGeologist',
+        49: 'ThoroughGeologist', 59: 'DiligentGeologist', 62: 'ChummyGeologist',
+        71: 'SophisticatedGeologist', 73: 'MummifiedGeologist', 76: 'GingerbreadGeologist',
+    };
+
+    function _subtypeNameFor(t) {
+        if (EXPLORER_TYPES[t])  return EXPLORER_TYPES[t];
+        if (GEOLOGIST_TYPES[t]) return GEOLOGIST_TYPES[t];
+        return null;
+    }
+
     // Classify specialist type.
-    // Priority: garrison check → numeric specialistType → name fallback.
+    // Priority: garrison check → Loca.cs subtype tables → numeric specialistType → name.
     // garrisonPos >= 0 is the authoritative General indicator (all Generals have a
     // garrison grid position; all Explorers/Geologists have -1).
-    // armyVO is present on EVERY dSpecialistVO and carries no type signal.
-    // Numeric mapping observed from live data: 0=General, 1=Explorer, 2=Geologist.
-    // Premium variants have higher numeric IDs; those are handled by task class or hints.
     function _classifySpec(t, garrisonPos, name) {
         if (garrisonPos >= 0) return 'General';
+        if (EXPLORER_TYPES[t])  return 'Explorer';
+        if (GEOLOGIST_TYPES[t]) return 'Geologist';
         if (t === 0) return 'General';
-        if (t === 1) return 'Explorer';
-        if (t === 2) return 'Geologist';
         if (t === 3) return 'General';
         var n = (name || '').toLowerCase();
         if (n.indexOf('geolog') >= 0)  return 'Geologist';
         if (n.indexOf('explor') >= 0)  return 'Explorer';
         if (n.indexOf('general') >= 0) return 'General';
         return 'Unknown';
+    }
+
+    // ArrayCollection / ObjectProxy decode to { __class, source:[...] } here; bare arrays
+    // pass through. Used for fields like dSpecialistVO.skills.
+    function _unwrapCollection(v) {
+        if (!v) return [];
+        if (Array.isArray(v)) return v;
+        if (Array.isArray(v.source)) return v.source;
+        return [];
     }
 
     // Build uid→type hints from the game's own outbound type=95 dispatches.
@@ -627,6 +670,16 @@
         });
         // setCollectibles already called above; don't call again here
 
+        // Persist captured clock/player level even if no specialists in this response.
+        // clientTime calibrated to ms (2026-05-23). Kept for potential future use
+        // (e.g. recomputing remaining when collectedTime semantics change).
+        if (typeof ctx.serverClock === 'number') {
+            window._tsoServerClock = { serverTime: ctx.serverClock, capturedAtMs: Date.now() };
+        }
+        if (typeof ctx.playerLevel === 'number') {
+            window._tsoPlayerLevel = ctx.playerLevel;
+        }
+
         // ── Specialist extraction ─────────────────────────────────────────
         if (ctx.specialists.length > 0) {
             var specItems = [];
@@ -646,31 +699,52 @@
                     else if (typeof tf === 'number' && tf > 0) taskEnd = tf;
                 }
                 var taskTypeHint = _classifyFromTask(taskObj);
-                // Persist task-derived type into hints so idle specialists are still
-                // correctly classified on the next zone load (when task will be null).
                 if (taskTypeHint) {
                     if (!window._tsoSpecTypeHints) window._tsoSpecTypeHints = {};
                     window._tsoSpecTypeHints[uk] = taskTypeHint;
                 }
                 var hints = window._tsoSpecTypeHints;
+                var subTypeId = (typeof sp.specialistType === 'number') ? sp.specialistType : -1;
                 var spType = (hints && hints[uk])
                     || taskTypeHint
-                    || _classifySpec(sp.specialistType, sp.garrisonBuildingGridPos | 0, sp.name_string);
+                    || _classifySpec(subTypeId, sp.garrisonBuildingGridPos | 0, sp.name_string);
+
+                // Skills: ArrayCollection of SkillVO{id, level}. Emit IDs where level > 0.
+                var skills = [];
+                _unwrapCollection(sp.skills).forEach(function(sk) {
+                    if (sk && typeof sk.id === 'number' && (sk.level | 0) > 0) skills.push(sk.id);
+                });
+
+                var collectedTime = (taskObj && typeof taskObj.collectedTime === 'number')
+                    ? taskObj.collectedTime : null;
+                var bonusTime = (taskObj && typeof taskObj.bonusTime === 'number')
+                    ? taskObj.bonusTime : null;
+
                 specItems.push({
                     uid: uk,
                     uid1: u1,
                     uid2: u2,
                     specialistType: spType,
+                    subTypeId: subTypeId,
+                    subTypeName: _subtypeNameFor(subTypeId),
                     name: sp.name_string || '',
                     isIdle: taskObj === null,
+                    skills: skills,
+                    collectedTime: collectedTime,
+                    bonusTime: bonusTime,
                     taskEndTime: taskEnd,
                 });
             }
             if (specItems.length > 0) {
                 window._tsoSpecialists = specItems;
-                window._tsoSend('SPECIALISTS', { items: specItems });
+                window._tsoSend('SPECIALISTS', {
+                    items: specItems,
+                    playerLevel: (typeof window._tsoPlayerLevel === 'number') ? window._tsoPlayerLevel : null,
+                    serverTime: (window._tsoServerClock && window._tsoServerClock.serverTime) || null,
+                });
                 webkit.messageHandlers.logger.postMessage(
-                    '[AMF3:' + channel + '] specialists=' + specItems.length);
+                    '[AMF3:' + channel + '] specialists=' + specItems.length +
+                    ' level=' + (window._tsoPlayerLevel != null ? window._tsoPlayerLevel : '?'));
             }
         }
 

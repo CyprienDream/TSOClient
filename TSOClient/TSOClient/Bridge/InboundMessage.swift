@@ -26,14 +26,21 @@ enum InboundMessage {
 
     struct SpecialistsPayload {
         let items: [Item]
+        let playerLevel: Int?
+        let serverTime: Double?
 
         struct Item {
             let uid: String
             let uid1: Int
             let uid2: Int
-            let specialistType: String
+            let specialistType: String      // "Explorer" | "Geologist" | "General" | "Unknown"
+            let subTypeId: Int              // numeric specialistType from AMF (-1 if absent)
+            let subTypeName: String?        // canonical name like "PirateExplorer" (nil if unmapped)
             let name: String
             let isIdle: Bool
+            let skills: [Int]               // skill IDs with level > 0
+            let collectedTime: Int?         // game-clock value at task start (unit TBD)
+            let bonusTime: Int?
             let taskEndTime: Double?
         }
     }
@@ -82,16 +89,26 @@ enum InboundMessage {
             guard let uid  = s["uid"]  as? String,
                   let uid1 = s["uid1"] as? Int,
                   let uid2 = s["uid2"] as? Int else { return nil }
+            let skillsArr = (s["skills"] as? [Any] ?? []).compactMap { ($0 as? NSNumber)?.intValue }
             return .init(
                 uid:            uid,
                 uid1:           uid1,
                 uid2:           uid2,
                 specialistType: s["specialistType"] as? String ?? "Unknown",
+                subTypeId:      s["subTypeId"]      as? Int    ?? -1,
+                subTypeName:    s["subTypeName"]    as? String,
                 name:           s["name"]           as? String ?? "",
                 isIdle:         s["isIdle"]         as? Bool   ?? true,
-                taskEndTime:    s["taskEndTime"]     as? Double
+                skills:         skillsArr,
+                collectedTime:  s["collectedTime"]  as? Int,
+                bonusTime:      s["bonusTime"]      as? Int,
+                taskEndTime:    s["taskEndTime"]    as? Double
             )
         }
-        return .specialists(.init(items: items))
+        return .specialists(.init(
+            items:       items,
+            playerLevel: d["playerLevel"] as? Int,
+            serverTime:  d["serverTime"]  as? Double
+        ))
     }
 }

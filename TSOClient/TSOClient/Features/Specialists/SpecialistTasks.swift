@@ -4,7 +4,7 @@ struct TaskCode: Equatable, Hashable {
 }
 
 // Deposit codes from fedorovvl/tso_client userscripts (valueMap '0,X' keys).
-// actionType=0 for all geologist tasks.
+// actionType=0 for all geologist tasks. minLevel from 4-specialists.js geoDropSpec.req.
 enum GeologistTask: Int, CaseIterable, Identifiable {
     case findStone     = 0
     case findBronzeOre = 1
@@ -18,6 +18,7 @@ enum GeologistTask: Int, CaseIterable, Identifiable {
 
     var id: Int { rawValue }
     var taskCode: TaskCode { TaskCode(actionType: 0, subTaskID: rawValue) }
+
     var label: String {
         switch self {
         case .findStone:     return "Stone"
@@ -31,11 +32,31 @@ enum GeologistTask: Int, CaseIterable, Identifiable {
         case .findSalpeter:  return "Salpeter"
         }
     }
+
+    var minLevel: Int {
+        switch self {
+        case .findStone:     return 0
+        case .findBronzeOre: return 9
+        case .findMarble:    return 19
+        case .findIronOre:   return 20
+        case .findGoldOre:   return 23
+        case .findCoal:      return 24
+        case .findGranite:   return 60
+        case .findTitanium:  return 61
+        case .findSalpeter:  return 62
+        }
+    }
+
+    func isAvailable(playerLevel: Int?) -> Bool {
+        guard let lvl = playerLevel else { return true }
+        return lvl >= minLevel
+    }
 }
 
 // Task codes from fedorovvl/tso_client user_exp_time_matrix.js.
 // Treasures: actionType=1, subTaskID=0..6.
 // Adventures: actionType=2, subTaskID=0..3.
+// requiredSkillID encodes the Explorer skill needed (39=Artefact, 40=BeanACollada).
 enum ExplorerTask: CaseIterable, Identifiable {
     case treasureShort, treasureMedium, treasureLong, treasureVeryLong
     case treasureLongest, treasureErudite, treasureColada
@@ -57,6 +78,7 @@ enum ExplorerTask: CaseIterable, Identifiable {
         case .adventureVeryLong: return TaskCode(actionType: 2, subTaskID: 3)
         }
     }
+
     var label: String {
         switch self {
         case .treasureShort:     return "Treasure: Short"
@@ -65,12 +87,25 @@ enum ExplorerTask: CaseIterable, Identifiable {
         case .treasureVeryLong:  return "Treasure: Very Long"
         case .treasureLongest:   return "Treasure: Longest"
         case .treasureErudite:   return "Treasure: Erudite"
-        case .treasureColada:    return "Treasure: Colada"
+        case .treasureColada:    return "Treasure: Rarity Search"
         case .adventureShort:    return "Adventure: Short"
         case .adventureMedium:   return "Adventure: Medium"
         case .adventureLong:     return "Adventure: Long"
         case .adventureVeryLong: return "Adventure: Very Long"
         }
+    }
+
+    var requiredSkillID: Int? {
+        switch self {
+        case .treasureErudite: return 39
+        case .treasureColada:  return 40
+        default:               return nil
+        }
+    }
+
+    func isAvailable(skills: [Int]) -> Bool {
+        guard let req = requiredSkillID else { return true }
+        return skills.contains(req)
     }
 }
 
