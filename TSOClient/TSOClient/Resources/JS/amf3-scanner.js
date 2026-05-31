@@ -456,11 +456,12 @@
         78: 'FluffyButteExplorer',
     };
     var GEOLOGIST_TYPES = {
-        2: 'Geologist', 5: 'MasterGeologist', 26: 'ConscientiousGeologist',
+        2: 'Geologist', 5: 'JollyGeologist', 26: 'ConscientiousGeologist',
         34: 'IronWilledGeologist', 35: 'StoneColdGeologist', 38: 'VersedGeologist',
         40: 'LovelyGeologist', 42: 'GoldheartedGeologist', 45: 'ArcheologistGeologist',
         49: 'ThoroughGeologist', 59: 'DiligentGeologist', 62: 'ChummyGeologist',
         71: 'SophisticatedGeologist', 73: 'MummifiedGeologist', 76: 'GingerbreadGeologist',
+        83: 'SootyGeologist', 86: 'BalancedGeologist',
     };
 
     function _subtypeNameFor(t) {
@@ -493,6 +494,33 @@
         if (Array.isArray(v)) return v;
         if (Array.isArray(v.source)) return v.source;
         return [];
+    }
+
+    // Log every outbound dServerCall so unknown opcodes (e.g. buffs) surface in the console.
+    function logAllOutboundCalls(bodies, channel) {
+        try {
+            for (var i = 0; i < bodies.length; i++) {
+                var val = bodies[i].value;
+                if (!Array.isArray(val)) continue;
+                for (var j = 0; j < val.length; j++) {
+                    var rmsg = val[j];
+                    if (!rmsg || !rmsg.body) continue;
+                    var bodyArr = rmsg.body;
+                    if (!Array.isArray(bodyArr)) continue;
+                    for (var k = 0; k < bodyArr.length; k++) {
+                        var call = bodyArr[k];
+                        if (!call || !call.__class || call.__class.indexOf('dServerCall') < 0) continue;
+                        var action = call.data;
+                        webkit.messageHandlers.logger.postMessage(
+                            '[AMF3:out:' + channel + '] callType=' + call.type +
+                            ' zoneID=' + call.zoneID +
+                            ' actionType=' + (action && action.type) +
+                            ' actionGrid=' + (action && action.grid) +
+                            ' data=' + JSON.stringify(action && action.data, null, 2).slice(0, 800));
+                    }
+                }
+            }
+        } catch (_) {}
     }
 
     // Build uid→type hints from the game's own outbound type=95 dispatches.
@@ -590,8 +618,8 @@
             parsed = true;
             for (var i = 0; i < bodies.length; i++) {
                 scanTree(bodies[i].value, 0, ctx);
-                // Log acks for type=95 specialist dispatch commands so we can compare
-                // game-initiated acks vs our own acks side by side.
+                // Log acks for all dServerResponse types.
+                // type=95 is specialist dispatch; unknown types (e.g. buffs) will surface here.
                 (function(val) {
                     var msgs = Array.isArray(val) ? val : (val ? [val] : []);
                     msgs.forEach(function(msg) {
@@ -600,12 +628,11 @@
                         if (!body) return;
                         var sr = (body.__class && body.__class.indexOf('dServerResponse') >= 0) ? body : null;
                         if (!sr && body.data && body.data.__class && body.data.__class.indexOf('dServerResponse') >= 0) sr = body.data;
-                        if (sr && sr.type === 95) {
-                            webkit.messageHandlers.logger.postMessage(
-                                '[AMF3:' + channel + '] type=95 ack errorCode=' +
-                                (sr.data && sr.data.errorCode) + ' full=' +
-                                JSON.stringify(sr, null, 2).slice(0, 1500));
-                        }
+                        if (!sr) return;
+                        webkit.messageHandlers.logger.postMessage(
+                            '[AMF3:' + channel + '] ack type=' + sr.type +
+                            ' errorCode=' + (sr.data && sr.data.errorCode) +
+                            ' full=' + JSON.stringify(sr, null, 2).slice(0, 1500));
                     });
                 })(bodies[i].value);
             }
@@ -720,6 +747,21 @@
                 var bonusTime = (taskObj && typeof taskObj.bonusTime === 'number')
                     ? taskObj.bonusTime : null;
 
+                if (taskObj !== null) {
+                    var _label = _subtypeNameFor(subTypeId) || spType;
+                    if (sp.name_string) _label = sp.name_string + ' (' + _label + ')';
+                    var _taskFields = Object.keys(taskObj).filter(function(k) { return k !== '__class'; }).map(function(k) {
+                        var v = taskObj[k];
+                        if (v instanceof Date) return k + '=Date(' + v.getTime() + ')';
+                        if (v === null || v === undefined) return k + '=null';
+                        if (typeof v === 'object') return k + '={' + Object.keys(v).slice(0,6).join(',') + '}';
+                        return k + '=' + v;
+                    }).join(' ');
+                    webkit.messageHandlers.logger.postMessage(
+                        '[AMF3:spec:timing] ' + _label + ' uid=' + uk +
+                        ' serverClock=' + ctx.serverClock + ' | ' + _taskFields);
+                }
+
                 specItems.push({
                     uid: uk,
                     uid1: u1,
@@ -760,8 +802,10 @@
         var url = typeof input === 'string' ? input : (input && input.url) || '';
 
         var isPost = init && (init.method || '').toUpperCase() === 'POST';
-        if (url.includes('GameServer') && isPost && init.body) {
+        if (isPost && init.body) {
+            // Capture all POSTs — buff and other actions may use different URLs.
             captureOutboundBody(init.body, 'fetch');
+            webkit.messageHandlers.logger.postMessage('[AMF3:out:url] POST ' + url.slice(0, 120));
         }
         // Always update realm URL so zone-shard changes are picked up automatically.
         if (url.includes('GameServer/amf')) {
@@ -841,9 +885,16 @@
                 webkit.messageHandlers.logger.postMessage('[AMF3:out] capture error: ' + e);
             }
         }
-        if (body instanceof ArrayBuffer) { processBuf(body); return; }
-        if (body instanceof Uint8Array)  { processBuf(body.buffer.slice(body.byteOffset, body.byteOffset + body.byteLength)); return; }
-        if (body instanceof Blob) { body.arrayBuffer().then(processBuf).catch(function(){}); return; }
+        function processBufWithLog(buf) {
+            processBuf(buf);
+            try {
+                var p2 = new AMFParser(buf);
+                logAllOutboundCalls(p2.parseEnvelope(), channel);
+            } catch (_) {}
+        }
+        if (body instanceof ArrayBuffer) { processBufWithLog(body); return; }
+        if (body instanceof Uint8Array)  { processBufWithLog(body.buffer.slice(body.byteOffset, body.byteOffset + body.byteLength)); return; }
+        if (body instanceof Blob) { body.arrayBuffer().then(processBufWithLog).catch(function(){}); return; }
     }
 
     // ── XHR interception ────────────────────────────────────────────────
@@ -861,11 +912,16 @@
     };
     XMLHttpRequest.prototype.send = function(body) {
         var xhr = this;
-        if (xhr._tsoUrl && xhr._tsoUrl.indexOf('GameServer') >= 0) {
-            // Capture outbound body before sending.
-            if (xhr._tsoMethod === 'POST' && body) {
-                captureOutboundBody(body, 'xhr');
-            }
+        // Capture all POSTs — buff and other actions may use different URLs.
+        if (xhr._tsoMethod === 'POST' && body) {
+            captureOutboundBody(body, 'xhr');
+            webkit.messageHandlers.logger.postMessage('[AMF3:out:url] XHR POST ' + (xhr._tsoUrl || '?').slice(0, 120));
+        }
+        var wantResponse = xhr._tsoUrl && (
+            xhr._tsoUrl.indexOf('GameServer') >= 0 ||
+            xhr._tsoUrl.indexOf('amf') >= 0
+        );
+        if (wantResponse) {
             xhr.addEventListener('load', function() {
                 try {
                     var buf = null;

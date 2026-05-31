@@ -8,6 +8,8 @@ struct SpecialistsPanel: View {
     @State private var filter: String = "All"
     @State private var selectedTasks: [String: TaskCode] = [:]
     @State private var selectedGrids: [String: Int] = [:]
+    @State private var bulkGeologistTask: GeologistTask = .findStone
+    @State private var bulkExplorerTask: ExplorerTask = .treasureShort
 
     private let filters = ["All", "Geologist", "Explorer", "General"]
 
@@ -35,6 +37,7 @@ struct SpecialistsPanel: View {
                     .padding()
             } else {
                 bulkBar
+                bulkTaskPickers
                 Divider()
                 List(filtered) { spec in
                     SpecialistRow(
@@ -104,6 +107,64 @@ struct SpecialistsPanel: View {
         }
         .padding(.horizontal, 10)
         .padding(.vertical, 6)
+    }
+
+    // Per-subcategory bulk-task selectors. Picking a task here propagates it to
+    // every spec of that subcategory (regardless of current filter), so the
+    // individual row pickers all show the chosen task.
+    @ViewBuilder
+    private var bulkTaskPickers: some View {
+        let showGeo = filter == "All" || filter == "Geologist"
+        let showExp = filter == "All" || filter == "Explorer"
+        if showGeo || showExp {
+            VStack(alignment: .leading, spacing: 4) {
+                if showGeo {
+                    HStack {
+                        Text("All Geologists:")
+                            .font(.caption).foregroundStyle(.secondary)
+                        Picker("", selection: $bulkGeologistTask) {
+                            ForEach(GeologistTask.allCases) { t in
+                                Text(taskLabel(t)).tag(t)
+                            }
+                        }
+                        .labelsHidden()
+                        .frame(maxWidth: .infinity)
+                        .onChange(of: bulkGeologistTask) { _, new in
+                            applyBulkTask(new.taskCode, to: "Geologist")
+                        }
+                    }
+                }
+                if showExp {
+                    HStack {
+                        Text("All Explorers:")
+                            .font(.caption).foregroundStyle(.secondary)
+                        Picker("", selection: $bulkExplorerTask) {
+                            ForEach(ExplorerTask.allCases) { t in
+                                Text(t.label).tag(t)
+                            }
+                        }
+                        .labelsHidden()
+                        .frame(maxWidth: .infinity)
+                        .onChange(of: bulkExplorerTask) { _, new in
+                            applyBulkTask(new.taskCode, to: "Explorer")
+                        }
+                    }
+                }
+            }
+            .padding(.horizontal, 10)
+            .padding(.vertical, 6)
+        }
+    }
+
+    private func applyBulkTask(_ code: TaskCode, to type: String) {
+        for spec in store.items where spec.specialistType == type {
+            selectedTasks[spec.id] = code
+        }
+    }
+
+    private func taskLabel(_ t: GeologistTask) -> String {
+        if t.isAvailable(playerLevel: store.playerLevel) { return t.label }
+        return "\(t.label) (lvl \(t.minLevel))"
     }
 
     // Fire bulk dispatch sequentially with a small inter-call delay so rapid
@@ -188,23 +249,15 @@ struct SpecialistRow: View {
                 .foregroundStyle(.white)
                 .padding(.horizontal, 6).padding(.vertical, 2)
                 .background(Color.green, in: Capsule())
-        } else if let collected = spec.collectedTime, let startedAt = taskStartedAt {
-            // collectedTime is task total duration in ms. Countdown = duration − elapsed.
-            // Exact for tasks we observed idle→busy; overestimates for tasks already
-            // busy at app launch (we anchored start at first observation).
-            let durationSec = Double(collected) / 1000.0
-            let elapsedSec = now.timeIntervalSince(startedAt)
-            let remaining = max(0, durationSec - elapsedSec)
-            if remaining <= 0 {
-                Text("Done?")
-                    .font(.caption2)
-                    .foregroundStyle(.orange)
-            } else {
-                Text(formatDuration(remaining))
-                    .font(.caption2)
-                    .foregroundStyle(.secondary)
-                    .monospacedDigit()
-            }
+        } else if let startedAt = taskStartedAt {
+            // collectedTime = elapsed ms (counts up), so taskStartedAt is back-calculated
+            // to the real start. Display elapsed since start; total duration is not in the
+            // AMF data — it comes from game-client config — so remaining can't be shown.
+            let elapsed = now.timeIntervalSince(startedAt)
+            Text(formatDuration(max(0, elapsed)))
+                .font(.caption2)
+                .foregroundStyle(.orange)
+                .monospacedDigit()
         } else {
             Text("Busy")
                 .font(.caption2)
@@ -292,7 +345,8 @@ struct SpecialistRow: View {
 
     private func formatDuration(_ secs: Double) -> String {
         let s = Int(secs)
-        let h = s / 3600, m = (s % 3600) / 60, sec = s % 60
+        let d = s / 86400, h = (s % 86400) / 3600, m = (s % 3600) / 60, sec = s % 60
+        if d > 0 { return String(format: "%dd %dh %02dm", d, h, m) }
         if h > 0 { return String(format: "%dh %02dm", h, m) }
         return String(format: "%dm %02ds", m, sec)
     }

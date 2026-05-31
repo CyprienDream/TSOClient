@@ -67,13 +67,17 @@ final class SpecialistsStore {
             taskStartedAt.removeValue(forKey: uid)
         }
 
-        // For each newly-busy spec we haven't timed yet, anchor now as task start.
-        // Preserve existing anchors so countdown survives zone reloads.
+        // collectedTime = elapsed ms since task start (counts up). Back-calculate the
+        // actual task start wall-clock time and refresh it on every zone load so the
+        // elapsed display stays accurate regardless of when the app was launched.
         for item in payload.items {
-            if !item.isIdle, taskStartedAt[item.uid] == nil {
-                taskStartedAt[item.uid] = now
-            }
-            if item.isIdle {
+            if !item.isIdle {
+                if let ct = item.collectedTime {
+                    taskStartedAt[item.uid] = now.addingTimeInterval(-Double(ct) / 1000.0)
+                } else if taskStartedAt[item.uid] == nil {
+                    taskStartedAt[item.uid] = now
+                }
+            } else {
                 taskStartedAt.removeValue(forKey: item.uid)
             }
         }

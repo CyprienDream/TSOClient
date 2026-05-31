@@ -22,10 +22,10 @@ enum GeologistTask: Int, CaseIterable, Identifiable {
     var label: String {
         switch self {
         case .findStone:     return "Stone"
-        case .findBronzeOre: return "Bronze Ore"
+        case .findBronzeOre: return "Copper"
         case .findMarble:    return "Marble"
-        case .findIronOre:   return "Iron Ore"
-        case .findGoldOre:   return "Gold Ore"
+        case .findIronOre:   return "Iron"
+        case .findGoldOre:   return "Gold"
         case .findCoal:      return "Coal"
         case .findGranite:   return "Granite"
         case .findTitanium:  return "Titanium"
