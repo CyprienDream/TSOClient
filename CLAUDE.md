@@ -9,7 +9,7 @@ A native macOS wrapper around The Settlers Online (TSO), built as an automation 
 - Building textures **are** fetched individually via `fetch()` from Ubisoft's CDN (`ubistatic-a.akamaihd.net/frontend/GFX_HASHED/building_lib/<sha1>.png`). This is how the collectible texture patcher works: it intercepts those fetches and returns a synthetic pink PNG for known collectible hashes. `<img>` elements are not used for game art.
 - `gameevents.registerHook` exposes only coarse lifecycle triggers (`triggerLevelUp`, `triggerTutorialEnd`, `triggerFriendInvite`, `triggerClientLoaded`); not useful for game-state reading.
 
-The long-term goal is a full automation suite: collectible highlighting, explorer/specialist dispatch, buffing, adventure management. The **Collectible Highlighter** shipped (via texture substitution). **Specialist Dispatch** is code-complete but not yet verified end-to-end (see `specialist-dispatch.md`).
+The long-term goal is a full automation suite: collectible highlighting, explorer/specialist dispatch, buffing, adventure management. The **Collectible Highlighter** shipped (via texture substitution). **Specialist Dispatch** is server-side end-to-end verified — the AMF3 RPC reaches GameServer, the server accepts, and specialists actually start the task. The remaining gap is that Unity's in-game UI (greyed icon + countdown bar in the star menu) only reflects the change after a zone reload; our injected `fetch` bypasses Unity's local state. See `specialist-dispatch.md` for AMF wire-format details and `log.md` for the current in-game-UI-refresh investigation.
 
 **What a collectible is:** a resource item (herbs, banner, food cart, etc.) that spawns at a random map tile on the player's island and is picked up by clicking. *Not* a building, and *not* the per-building "ready to collect" stockpile (`dPersistedPickupItemVO`). The feature mirrors what the **Pinky** Chrome extension and the Windows AIR client (`fedorovvl/tso_client`) do for the same game.
 
@@ -59,6 +59,7 @@ TSOClient/                      ← Xcode project root
         amf3-scanner.js         ← AMF3 deserialiser, fetch/XHR interception, auth caching
         amf3-encoder.js         ← AMF3 serialiser + _TSORPC.dispatchSpecialist
         collectible-patcher.js  ← returns pink PNG for 55 known collectible hashes
+        unity-probe.js          ← captures the Unity instance, exposes as window._tsoUnity (recon completed; see log.md)
       Data/
         collectible-hashes.json ← 55 SHA-1 hashes (substituted into patcher at load time)
     Info.plist                  ← NSAllowsArbitraryLoads = true (game CDN needs it)
@@ -67,17 +68,17 @@ TSOClient/                      ← Xcode project root
 
 ## Architecture in one paragraph
 
-`WebView` loads `thesettlersonline.com`. `JSInjection` installs four JS modules at `atDocumentStart` in dependency order: **bridge.js** (sets up `window.TSOBridge` for Swift→JS and `window._tsoSend` for JS→Swift), **amf3-scanner.js** (wraps `window.fetch` and `XMLHttpRequest`, deserialises GameServer AMF3 binary responses, emits `COLLECTIBLES` and `SPECIALISTS` messages, caches auth context in `window._tsoAuthCtx`), **amf3-encoder.js** (AMF3 serialiser, builds `RemotingMessage` envelopes, exposes `_TSORPC.dispatchSpecialist` and registers the `DISPATCH_SPECIALIST` TSOBridge handler), **collectible-patcher.js** (wraps `fetch` + `XHR`; for 55 known collectible building-texture hashes returns a 32×32 hot-pink synthetic PNG so Unity renders those buildings pink in-world). JS→Swift uses two named `WKScriptMessageHandler` channels: `"logger"` (raw strings) and `"tso"` (structured `{type, payload}` JSON). Swift→JS goes through `BridgeSender.send(_ msg: OutboundMessage)`, which calls `webView.evaluateJavaScript(msg.jsExpression)`. `BridgeRouter` maps decoded `InboundMessage` values to store mutations on the main thread.
+`WebView` loads `thesettlersonline.com`. `JSInjection` installs five JS modules at `atDocumentStart` in dependency order: **bridge.js** (sets up `window.TSOBridge` for Swift→JS and `window._tsoSend` for JS→Swift), **amf3-scanner.js** (wraps `window.fetch` and `XMLHttpRequest`, deserialises GameServer AMF3 binary responses, emits `COLLECTIBLES` and `SPECIALISTS` messages, caches auth context in `window._tsoAuthCtx`), **amf3-encoder.js** (AMF3 serialiser, builds `RemotingMessage` envelopes, exposes `_TSORPC.dispatchSpecialist` and registers the `DISPATCH_SPECIALIST` TSOBridge handler), **collectible-patcher.js** (wraps `fetch` + `XHR`; for 55 known collectible building-texture hashes returns a 32×32 hot-pink synthetic PNG so Unity renders those buildings pink in-world), **unity-probe.js** (uses a `MutationObserver` between `<script>` tags to wrap `window.createUnityInstance` and capture the Unity instance, exposing it as `window._tsoUnity`; the in-game UI refresh recon that motivated this probe concluded the JS bridge can't drive Unity's specialist UI — see `log.md`). JS→Swift uses two named `WKScriptMessageHandler` channels: `"logger"` (raw strings) and `"tso"` (structured `{type, payload}` JSON). Swift→JS goes through `BridgeSender.send(_ msg: OutboundMessage)`, which calls `webView.evaluateJavaScript(msg.jsExpression)`. `BridgeRouter` maps decoded `InboundMessage` values to store mutations on the main thread.
 
 ## Bridge protocol
 
 **JS → Swift (`"tso"` handler):**
 - `COLLECTIBLES` — `{mapWidth, mapHeight, items:[{gridIndex,x,y,assetName}]}`
 - `GAME_STATE`   — `{state:"LOADED"|"ZONE_CHANGED"|"ZONE_LEFT", zoneId?}`
-- `SPECIALISTS`  — `{items:[{uid,uid1,uid2,specialistType,name,level,isIdle,taskEndTime?}]}`
+- `SPECIALISTS`  — `{items:[{uid,uid1,uid2,specialistType,name,isIdle,taskEndTime?}]}`
 
 **Swift → JS (`BridgeSender.send(_:)` → `OutboundMessage.jsExpression`):**
-- `DISPATCH_SPECIALIST` — `{uid1, uid2, taskCode, targetGrid}` → handled by `amf3-encoder.js`
+- `DISPATCH_SPECIALIST` — `{uid1, uid2, actionType, taskCode, targetGrid}` → handled by `amf3-encoder.js`
 
 ## Highlighting approach
 
@@ -88,7 +89,7 @@ The canvas overlay approach was abandoned in Iteration 7 because Unity renders v
 ## Key invariants
 
 - `WebView.updateNSView` guards `webView.url == nil` — do not remove this or the game reloads on every SwiftUI state change.
-- JS injection order: **bridge → scanner → encoder → patcher**. The patcher must run **after** the scanner because it wraps the scanner's already-patched `window.fetch`; reversing the order breaks AMF3 parsing on non-collectible URLs.
+- JS injection order: **bridge → scanner → encoder → patcher → unity-probe**. The patcher must run **after** the scanner because it wraps the scanner's already-patched `window.fetch`; reversing the order breaks AMF3 parsing on non-collectible URLs. The probe runs last; it touches only `window.createUnityInstance` / `SendMessage` so its order relative to the fetch chain doesn't matter.
 - AMF3 VO object-literal member order in `amf3-encoder.js` is load-bearing (trait registration is order-dependent on the wire).
 - `WKUserContentController.add(_:name:)` retains the handler — `WebViewCoordinator` is `NSObject`, no extra wrapper needed.
 - `@Observable` (Swift 5.9 macro, not `ObservableObject`). Use `@State` at the owner site; the class reference propagates automatically.
@@ -116,7 +117,9 @@ The canvas overlay approach was abandoned in Iteration 7 because Unity renders v
 
 ## What does NOT exist yet
 
-- Specialist dispatch verified end-to-end (code complete — see `specialist-dispatch.md`; needs live testing).
+- **In-game UI refresh on injected dispatch** — Unity's specialist icon doesn't grey out / show its countdown bar until a zone reload. Recon (2026-05-23) proved this can't be fixed from JS: Unity doesn't use the JS bridge for in-game dispatch and the wasm has no symbolic exports. Mitigated by optimistic UI in our own panel via `SpecialistsStore.markDispatched(uid:)`. See log.md "Approach 1 dead end".
+- Task countdown timer in our own panel — `collectedTime` is a game-internal clock; conversion to real time is unknown.
+- General dispatch auto-populated with `garrisonBuildingGridPos` (user must enter grid manually for now).
 - Buff management, adventure features, trading, building automation.
 - Persistent storage of dispatch templates or any app settings.
 - Unit or UI tests.

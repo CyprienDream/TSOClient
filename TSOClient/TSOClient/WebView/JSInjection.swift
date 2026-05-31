@@ -1,18 +1,21 @@
 import WebKit
 
-// Loads the four active JS modules from Resources/JS/ in the required injection
-// order: bridge → scanner → encoder → patcher.
+// Loads the active JS modules from Resources/JS/ in the required injection
+// order: bridge → scanner → encoder → patcher → unity-probe.
 enum JSInjection {
 
-    // Injection order: bridge → scanner → encoder → patcher.
+    // Injection order: bridge → scanner → encoder → patcher → unity-probe.
     // The patcher must run after the scanner because it wraps the scanner's
     // already-patched window.fetch. DO NOT reorder.
+    // unity-probe runs last; it only touches window.createUnityInstance / SendMessage
+    // and does not interfere with the fetch chain.
     static func install(into controller: WKUserContentController) {
         let sources = [
             load("bridge"),
             load("amf3-scanner"),
             load("amf3-encoder"),
             resolvePatched("collectible-patcher"),
+            load("unity-probe"),
         ]
         for source in sources {
             controller.addUserScript(

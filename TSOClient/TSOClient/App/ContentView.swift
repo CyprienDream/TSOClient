@@ -14,6 +14,7 @@ struct ContentView: View {
                 .frame(minWidth: 800, minHeight: 768)
 
             SpecialistsPanel(store: specialistsStore) { uid1, uid2, taskCode, targetGrid in
+                specialistsStore.markDispatched(uid: "\(uid1):\(uid2)")
                 sender.send(.dispatchSpecialist(
                     uid1: uid1, uid2: uid2,
                     actionType: taskCode.actionType,
