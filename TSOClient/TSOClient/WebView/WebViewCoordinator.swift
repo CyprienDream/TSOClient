@@ -5,8 +5,10 @@ final class WebViewCoordinator: NSObject, WKUIDelegate, WKNavigationDelegate, WK
     private let router: BridgeRouter
     weak var webView: WKWebView?
 
-    init(store: CollectiblesStore, specialistsStore: SpecialistsStore) {
-        self.router = BridgeRouter(collectibles: store, specialists: specialistsStore)
+    init(store: CollectiblesStore, specialistsStore: SpecialistsStore,
+         buildingsStore: BuildingsStore, buffsStore: BuffsStore) {
+        self.router = BridgeRouter(collectibles: store, specialists: specialistsStore,
+                                   buildings: buildingsStore, buffs: buffsStore)
     }
 
     // Open target="_blank" links inside the same view.

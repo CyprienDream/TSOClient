@@ -44,6 +44,7 @@ struct SpecialistsPanel: View {
                         spec: spec,
                         playerLevel: store.playerLevel,
                         taskStartedAt: store.taskStartedAt[spec.id],
+                        learnedDurations: store.learnedDurations,
                         taskCode: Binding(
                             get: { selectedTasks[spec.id] ?? defaultTask(for: spec) },
                             set: { selectedTasks[spec.id] = $0 }
@@ -212,6 +213,7 @@ struct SpecialistRow: View {
     let spec: SpecialistsStore.SpecialistItem
     let playerLevel: Int?
     let taskStartedAt: Date?
+    let learnedDurations: [String: Int]
     @Binding var taskCode: TaskCode
     @Binding var targetGrid: Int
     var onDispatch: (TaskCode, Int) -> Void
@@ -250,14 +252,25 @@ struct SpecialistRow: View {
                 .padding(.horizontal, 6).padding(.vertical, 2)
                 .background(Color.green, in: Capsule())
         } else if let startedAt = taskStartedAt {
-            // collectedTime = elapsed ms (counts up), so taskStartedAt is back-calculated
-            // to the real start. Display elapsed since start; total duration is not in the
-            // AMF data — it comes from game-client config — so remaining can't be shown.
-            let elapsed = now.timeIntervalSince(startedAt)
-            Text(formatDuration(max(0, elapsed)))
-                .font(.caption2)
-                .foregroundStyle(.orange)
-                .monospacedDigit()
+            let elapsed = max(0, now.timeIntervalSince(startedAt))
+            if let key = spec.durationKey,
+               let learnedMs = learnedDurations[key] {
+                // Known duration from a previous completion — show remaining countdown.
+                let remaining = max(0, Double(learnedMs) / 1000.0 - elapsed)
+                if remaining <= 0 {
+                    Text("Done?")
+                        .font(.caption2).foregroundStyle(.orange)
+                } else {
+                    Text(formatDuration(remaining))
+                        .font(.caption2).foregroundStyle(.secondary)
+                        .monospacedDigit()
+                }
+            } else {
+                // No learned duration yet — show elapsed (orange) as honest fallback.
+                Text(formatDuration(elapsed))
+                    .font(.caption2).foregroundStyle(.orange)
+                    .monospacedDigit()
+            }
         } else {
             Text("Busy")
                 .font(.caption2)

@@ -5,6 +5,8 @@ struct WebView: NSViewRepresentable {
     let url: URL
     var store: CollectiblesStore
     var specialistsStore: SpecialistsStore
+    var buildingsStore: BuildingsStore
+    var buffsStore: BuffsStore
     var sender: BridgeSender
 
     func makeNSView(context: Context) -> WKWebView {
@@ -38,6 +40,7 @@ struct WebView: NSViewRepresentable {
     }
 
     func makeCoordinator() -> WebViewCoordinator {
-        WebViewCoordinator(store: store, specialistsStore: specialistsStore)
+        WebViewCoordinator(store: store, specialistsStore: specialistsStore,
+                           buildingsStore: buildingsStore, buffsStore: buffsStore)
     }
 }

@@ -315,13 +315,87 @@
         });
     }
 
-    window._TSORPC = { sendAMF: sendAMF, dispatchSpecialist: dispatchSpecialist };
+    // Dispatch a buff to a single building.
+    // Wire format mirrors dispatchSpecialist but uses callType=61 with a bare
+    // dUniqueID as the action data (observed from game traffic; no building-type
+    // encoding needed).
+    function dispatchBuff(opts) {
+        var ctx = window._tsoAuthCtx;
+        if (!ctx || !ctx.dsoAuthToken) {
+            webkit.messageHandlers.logger.postMessage(
+                '[_TSORPC:buff] auth not ready — make a manual game action first');
+            return Promise.reject(new Error('auth not ready'));
+        }
+
+        var buffUid1  = opts.buffUid1  | 0;
+        var buffUid2  = opts.buffUid2  | 0;
+        var grid      = opts.targetGrid | 0;
+
+        var buffUniqueID = {
+            __class:   'defaultGame.Communication.VO.dUniqueID',
+            uniqueID1: buffUid1,
+            uniqueID2: buffUid2,
+        };
+        var action = {
+            __class:  'defaultGame.Communication.VO.dServerAction',
+            type:     0,
+            grid:     grid,
+            endGrid:  0,
+            data:     buffUniqueID,
+        };
+        var call = {
+            __class:               'defaultGame.Communication.VO.dServerCall',
+            type:                  61,
+            zoneID:                ctx.zoneID,
+            data:                  action,
+            dsoAuthUser:           ctx.dsoAuthUser,
+            dsoAuthToken:          ctx.dsoAuthToken,
+            dsoAuthRandomClientID: ctx.dsoAuthRandomClientID,
+        };
+        var headers = {
+            __class:    '',
+            DSEndpoint: 'SMC-Endpoint',
+            DSId:       ctx.DSId,
+        };
+        var msg = {
+            __class:        'flex.messaging.messages.RemotingMessage',
+            source:         'com.bluebyte.game.servlet.EventHandler',
+            operation:      'ExecuteServerCall',
+            parameters:     null,
+            remoteUsername: null,
+            remotePassword: null,
+            correlationId:  null,
+            body:           [call],
+            clientId:       null,
+            destination:    'SMC',
+            headers:        headers,
+            messageId:      uuid(),
+            timestamp:      0,
+            timeToLive:     0,
+        };
+
+        webkit.messageHandlers.logger.postMessage(
+            '[_TSORPC:buff] buffUid=' + buffUid1 + ':' + buffUid2 +
+            ' grid=' + grid + ' zone=' + ctx.zoneID);
+
+        return sendAMF([msg]).then(function(result) {
+            webkit.messageHandlers.logger.postMessage(
+                '[_TSORPC:buff] ack: ' + JSON.stringify(result));
+        }).catch(function(e) {
+            webkit.messageHandlers.logger.postMessage('[_TSORPC:buff] error: ' + e);
+        });
+    }
+
+    window._TSORPC = { sendAMF: sendAMF, dispatchSpecialist: dispatchSpecialist, dispatchBuff: dispatchBuff };
     window._TSOAMFWriter = AMFWriter;
 
     // Register TSOBridge handlers for Swift-initiated dispatches.
     if (window.TSOBridge) {
         window.TSOBridge.register('DISPATCH_SPECIALIST', function(p) {
             dispatchSpecialist(p);
+        });
+        window.TSOBridge.register('DISPATCH_BUFF', function(p) {
+            dispatchBuff(p);
         });
         window.TSOBridge.register('RPC_SEND', function(p) {
             sendAMF(p.args || []);

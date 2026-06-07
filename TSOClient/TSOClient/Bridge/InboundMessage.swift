@@ -5,6 +5,8 @@ enum InboundMessage {
     case collectibles(CollectiblesPayload)
     case gameState(GameStatePayload)
     case specialists(SpecialistsPayload)
+    case buildings(BuildingsPayload)
+    case buffs(BuffsPayload)
 
     struct CollectiblesPayload {
         let mapWidth: Int
@@ -24,6 +26,31 @@ enum InboundMessage {
         let zoneId: Int?
     }
 
+    struct BuildingsPayload {
+        let items: [Item]
+
+        struct Item {
+            let gridIndex: Int
+            let skin: String        // building type name, e.g. "Woodcutter_01"
+            let uid1: Int
+            let uid2: Int
+            let activeBuff: String? // buffName_string of the first active buff, if any
+        }
+    }
+
+    struct BuffsPayload {
+        let items: [Item]
+
+        struct Item {
+            let uid1: Int
+            let uid2: Int
+            let buffName: String        // e.g. "HiredMilitary"
+            let resourceName: String    // e.g. "Recruit" (empty for non-resource buffs)
+            let amount: Int             // quantity in inventory
+            let insertedAt: Int         // Unix timestamp
+        }
+    }
+
     struct SpecialistsPayload {
         let items: [Item]
         let playerLevel: Int?
@@ -39,9 +66,11 @@ enum InboundMessage {
             let name: String
             let isIdle: Bool
             let skills: [Int]               // skill IDs with level > 0
-            let collectedTime: Int?         // game-clock value at task start (unit TBD)
+            let collectedTime: Int?         // elapsed ms since task start (counts up)
             let bonusTime: Int?
             let taskEndTime: Double?
+            let taskActionType: Int?        // dServerAction.type while busy (0=Geo,1/2=Exp,12=Gen)
+            let taskSubTaskId: Int?         // dStartSpecialistTaskVO.subTaskID while busy
         }
     }
 
@@ -55,8 +84,42 @@ enum InboundMessage {
         case "COLLECTIBLES":    return decodeCollectibles(payload)
         case "GAME_STATE":      return decodeGameState(payload)
         case "SPECIALISTS":     return decodeSpecialists(payload)
+        case "BUILDINGS":       return decodeBuildings(payload)
+        case "BUFFS":           return decodeBuffs(payload)
         default:                return nil
         }
+    }
+
+    private static func decodeBuildings(_ raw: Any) -> InboundMessage? {
+        guard let d = raw as? [String: Any],
+              let rawItems = d["items"] as? [[String: Any]] else { return nil }
+        let items: [BuildingsPayload.Item] = rawItems.compactMap { b in
+            guard let gi = b["gridIndex"] as? Int else { return nil }
+            return .init(
+                gridIndex:  gi,
+                skin:       b["skin"]        as? String ?? "",
+                uid1:       b["uid1"]        as? Int    ?? 0,
+                uid2:       b["uid2"]        as? Int    ?? 0,
+                activeBuff: b["activeBuff"]  as? String
+            )
+        }
+        return .buildings(.init(items: items))
+    }
+
+    private static func decodeBuffs(_ raw: Any) -> InboundMessage? {
+        guard let d = raw as? [String: Any],
+              let rawItems = d["items"] as? [[String: Any]] else { return nil }
+        let items: [BuffsPayload.Item] = rawItems.compactMap { b in
+            return .init(
+                uid1:         b["uid1"]         as? Int    ?? 0,
+                uid2:         b["uid2"]         as? Int    ?? 0,
+                buffName:     b["buffName"]      as? String ?? "",
+                resourceName: b["resourceName"]  as? String ?? "",
+                amount:       b["amount"]        as? Int    ?? 0,
+                insertedAt:   b["insertedAt"]    as? Int    ?? 0
+            )
+        }
+        return .buffs(.init(items: items))
     }
 
     private static func decodeCollectibles(_ raw: Any) -> InboundMessage? {
@@ -100,9 +163,11 @@ enum InboundMessage {
                 name:           s["name"]           as? String ?? "",
                 isIdle:         s["isIdle"]         as? Bool   ?? true,
                 skills:         skillsArr,
-                collectedTime:  s["collectedTime"]  as? Int,
-                bonusTime:      s["bonusTime"]      as? Int,
-                taskEndTime:    s["taskEndTime"]    as? Double
+                collectedTime:  s["collectedTime"]   as? Int,
+                bonusTime:      s["bonusTime"]       as? Int,
+                taskEndTime:    s["taskEndTime"]     as? Double,
+                taskActionType: s["taskActionType"]  as? Int,
+                taskSubTaskId:  s["taskSubTaskID"]   as? Int
             )
         }
         return .specialists(.init(

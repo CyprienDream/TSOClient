@@ -1,0 +1,93 @@
+import Foundation
+import Observation
+
+@Observable
+final class BuildingsStore {
+    var items: [BuildingItem] = []
+    // skinBase → buildings, sorted by gridIndex. Rebuilt in `apply` so panel
+    // lookups are O(1) dict hits instead of O(N) filters + regex per render.
+    private(set) var bySkinBase: [String: [BuildingItem]] = [:]
+
+    struct BuildingItem: Identifiable {
+        var id: String { "\(uid1):\(uid2)" }
+        let gridIndex: Int
+        let skin: String        // raw skin name, e.g. "Woodcutter_01"
+        let skinBase: String    // skin with trailing "_NN" stripped — computed once at apply.
+        let uid1: Int
+        let uid2: Int
+        let activeBuff: String? // buffName_string of first active buff, nil if unbuffed
+
+        var displayName: String {
+            if let known = BuildingItem.knownNames[skinBase] { return known }
+            // Fallback: insert spaces before uppercase runs (CamelCase → words).
+            var out = ""
+            for (i, ch) in skinBase.enumerated() {
+                if i > 0 && ch.isUppercase { out.append(" ") }
+                out.append(ch)
+            }
+            return out.isEmpty ? skinBase : out
+        }
+
+        private static let knownNames: [String: String] = [
+            "WoodCutter":       "Pinewood Cutter",
+            "RealWoodCutter":   "Hardwood Cutter",
+            "ExoticWoodCutter": "Exotic Wood Cutter",
+        ]
+    }
+
+    // Buildings matching a skin filter, grouped by skinBase, sorted by name then grid.
+    // Pass nil to get all buildings.
+    func grouped(containing filter: String?) -> [(skin: String, buildings: [BuildingItem])] {
+        var groups: [String: [BuildingItem]] = [:]
+        for b in items {
+            if let f = filter, !b.skinBase.localizedCaseInsensitiveContains(f) { continue }
+            groups[b.skinBase, default: []].append(b)
+        }
+        return groups
+            .sorted { $0.key < $1.key }
+            .map { (skin: $0.key, buildings: $0.value.sorted { $0.gridIndex < $1.gridIndex }) }
+    }
+
+    // All buildings whose skinBase is any of `bases`, sorted by gridIndex.
+    // Backed by the prebuilt index — safe to call from view bodies.
+    func buildings(matchingSkinBases bases: [String]) -> [BuildingItem] {
+        var out: [BuildingItem] = []
+        for base in bases {
+            if let bucket = bySkinBase[base] { out.append(contentsOf: bucket) }
+        }
+        if bases.count > 1 { out.sort { $0.gridIndex < $1.gridIndex } }
+        return out
+    }
+
+    func apply(_ payload: InboundMessage.BuildingsPayload) {
+        // Regex compiled once, reused across all 586+ items.
+        let suffix = try! NSRegularExpression(pattern: #"_\d+$"#)
+        let newItems: [BuildingItem] = payload.items.map {
+            let s = $0.skin
+            let range = NSRange(s.startIndex..., in: s)
+            let base = suffix.stringByReplacingMatches(in: s, range: range, withTemplate: "")
+            return BuildingItem(
+                gridIndex: $0.gridIndex,
+                skin: s,
+                skinBase: base,
+                uid1: $0.uid1,
+                uid2: $0.uid2,
+                activeBuff: $0.activeBuff
+            )
+        }
+        var index: [String: [BuildingItem]] = [:]
+        for it in newItems {
+            index[it.skinBase, default: []].append(it)
+        }
+        for k in index.keys {
+            index[k]?.sort { $0.gridIndex < $1.gridIndex }
+        }
+        items = newItems
+        bySkinBase = index
+    }
+
+    func clear() {
+        items = []
+        bySkinBase = [:]
+    }
+}
