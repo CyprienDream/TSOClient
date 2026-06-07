@@ -7,13 +7,27 @@ final class SpecialistsStore {
     var playerLevel: Int? = nil
     var serverTime: Double? = nil
     var serverTimeCapturedAt: Date? = nil
-    // Wall-clock time we first observed each busy task. Server doesn't expose
-    // task_start_time; collectedTime is total duration in ms (calibrated 2026-05-23
-    // against in-game 5h2m remaining on a Bewitching Explorer w/ ct=163,485,578).
-    // remaining = collectedTime/1000 - (now - taskStartedAt[uid]).
-    // Exact for tasks we observed idle→busy; overestimates for tasks already busy at
-    // app launch until the next observed transition.
+
+    // Wall-clock time of actual task start, backtracked from ct on every zone load.
+    // ct = elapsed ms since task start → taskStartedAt = now - ct/1000.
     var taskStartedAt: [String: Date] = [:]
+
+    // Self-learning duration table. Populated when a specialist transitions busy→idle:
+    // key = "subTypeId:actionType:subTaskId", value = total task duration in ms.
+    // Persisted in UserDefaults so it survives app restarts.
+    var learnedDurations: [String: Int] = [:] {
+        didSet { UserDefaults.standard.set(learnedDurations, forKey: "tsoLearnedDurations") }
+    }
+
+    // Last-known task snapshot per uid, used to learn duration on completion.
+    private struct BusySnapshot {
+        let subTypeId: Int
+        let actionType: Int
+        let subTaskId: Int
+        let lastCt: Int        // collectedTime at last observation
+        let lastCtAt: Date     // wall-clock time of that observation
+    }
+    private var busySnapshots: [String: BusySnapshot] = [:]
 
     struct SpecialistItem: Identifiable {
         let id: String          // "uid1:uid2"
@@ -28,12 +42,13 @@ final class SpecialistsStore {
         let collectedTime: Int?
         let bonusTime: Int?
         let taskEndTime: Double?
+        let taskActionType: Int?        // nil when idle
+        let taskSubTaskId: Int?         // nil when idle
 
-        // "PirateExplorer" → "Pirate Explorer". When no canonical name (e.g. Generals —
-        // fedorovvl never enumerated General subtype IDs), fall back to the category
-        // plus the int so different premium generals are still distinguishable.
         var displaySubtype: String {
             if let raw = subTypeName, !raw.isEmpty {
+                if raw == "Explorer" { return "Basic Explorer" }
+                if raw == "General"  { return "Basic General" }
                 var out = ""
                 for (i, ch) in raw.enumerated() {
                     if i > 0 && ch.isUppercase { out.append(" ") }
@@ -45,15 +60,24 @@ final class SpecialistsStore {
             return specialistType
         }
 
-        // What to show as the primary label: player's custom name if set, otherwise subtype.
         var displayPrimary: String {
             name.isEmpty ? displaySubtype : name
         }
 
-        // True when primary and secondary labels would be identical — caller can skip
-        // rendering the duplicate.
         var hasDistinctSecondary: Bool {
             displayPrimary != displaySubtype
+        }
+
+        // Key into the learned-duration table.
+        var durationKey: String? {
+            guard let at = taskActionType, let st = taskSubTaskId else { return nil }
+            return "\(subTypeId):\(at):\(st)"
+        }
+    }
+
+    init() {
+        if let saved = UserDefaults.standard.dictionary(forKey: "tsoLearnedDurations") as? [String: Int] {
+            learnedDurations = saved
         }
     }
 
@@ -61,41 +85,65 @@ final class SpecialistsStore {
         let now = Date()
         let nextUids = Set(payload.items.map { $0.uid })
 
-        // Drop start times for specialists that are no longer busy (became idle, or
-        // dropped from the list entirely).
+        // Drop stale anchors for specialists no longer in the list.
         for uid in taskStartedAt.keys where !nextUids.contains(uid) {
             taskStartedAt.removeValue(forKey: uid)
         }
 
-        // collectedTime = elapsed ms since task start (counts up). Back-calculate the
-        // actual task start wall-clock time and refresh it on every zone load so the
-        // elapsed display stays accurate regardless of when the app was launched.
         for item in payload.items {
             if !item.isIdle {
+                // Backtrack to actual task start using ct (elapsed ms).
                 if let ct = item.collectedTime {
                     taskStartedAt[item.uid] = now.addingTimeInterval(-Double(ct) / 1000.0)
                 } else if taskStartedAt[item.uid] == nil {
                     taskStartedAt[item.uid] = now
                 }
+                // Update snapshot for duration learning.
+                if let ct = item.collectedTime,
+                   let at = item.taskActionType,
+                   let st = item.taskSubTaskId {
+                    busySnapshots[item.uid] = BusySnapshot(
+                        subTypeId: item.subTypeId,
+                        actionType: at,
+                        subTaskId: st,
+                        lastCt: ct,
+                        lastCtAt: now
+                    )
+                }
             } else {
                 taskStartedAt.removeValue(forKey: item.uid)
+                // Specialist just completed their task — record approximate total duration.
+                if let snap = busySnapshots[item.uid] {
+                    let extraMs = Int(now.timeIntervalSince(snap.lastCtAt) * 1000)
+                    let approxTotal = snap.lastCt + extraMs
+                    let key = "\(snap.subTypeId):\(snap.actionType):\(snap.subTaskId)"
+                    // Keep the most recent observation (last completion is most accurate).
+                    learnedDurations[key] = approxTotal
+                }
+                busySnapshots.removeValue(forKey: item.uid)
             }
+        }
+        // Drop snapshots for specialists that left the list entirely.
+        for uid in busySnapshots.keys where !nextUids.contains(uid) {
+            busySnapshots.removeValue(forKey: uid)
         }
 
         items = payload.items.map {
             SpecialistItem(
-                id: $0.uid,
-                uid1: $0.uid1,
-                uid2: $0.uid2,
+                id:             $0.uid,
+                uid1:           $0.uid1,
+                uid2:           $0.uid2,
                 specialistType: $0.specialistType,
-                subTypeId: $0.subTypeId,
-                subTypeName: $0.subTypeName,
-                name: $0.name,
-                isIdle: $0.isIdle,
-                skills: $0.skills,
-                collectedTime: $0.collectedTime,
-                bonusTime: $0.bonusTime,
-                taskEndTime: $0.taskEndTime
+                subTypeId:      $0.subTypeId,
+                subTypeName:    $0.subTypeName,
+                name:           $0.name,
+                isIdle:         $0.isIdle,
+                skills:         $0.skills,
+                collectedTime:  $0.collectedTime,
+                bonusTime:      $0.bonusTime,
+                taskEndTime:    $0.taskEndTime,
+                taskActionType: $0.taskActionType,
+                taskSubTaskId:  $0.taskSubTaskId
             )
         }
         if let lvl = payload.playerLevel { playerLevel = lvl }
@@ -105,30 +153,36 @@ final class SpecialistsStore {
         }
     }
 
-    // Optimistically flip the specialist to non-idle. Unity owns the in-game UI
-    // and only repaints the icon/countdown bar on zone reload; flipping our row's
-    // isIdle here gives immediate feedback in our panel until the next SPECIALISTS
-    // message (zone reload) replaces it with authoritative server state.
-    func markDispatched(uid: String) {
+    // Optimistic flip to non-idle. Seeds the busy snapshot immediately so the duration
+    // learning loop has a start anchor even if the next zone load is far in the future.
+    func markDispatched(uid: String, actionType: Int, subTaskId: Int) {
         guard let idx = items.firstIndex(where: { $0.id == uid }) else { return }
         let old = items[idx]
         items[idx] = SpecialistItem(
-            id: old.id,
-            uid1: old.uid1,
-            uid2: old.uid2,
+            id:             old.id,
+            uid1:           old.uid1,
+            uid2:           old.uid2,
             specialistType: old.specialistType,
-            subTypeId: old.subTypeId,
-            subTypeName: old.subTypeName,
-            name: old.name,
-            isIdle: false,
-            skills: old.skills,
-            collectedTime: old.collectedTime,
-            bonusTime: old.bonusTime,
-            taskEndTime: old.taskEndTime
+            subTypeId:      old.subTypeId,
+            subTypeName:    old.subTypeName,
+            name:           old.name,
+            isIdle:         false,
+            skills:         old.skills,
+            collectedTime:  old.collectedTime,
+            bonusTime:      old.bonusTime,
+            taskEndTime:    old.taskEndTime,
+            taskActionType: actionType,
+            taskSubTaskId:  subTaskId
         )
-        // Anchor the start time at dispatch — this is the only fresh transition we
-        // can observe directly, so the countdown will be exact for this spec.
-        taskStartedAt[uid] = Date()
+        let now = Date()
+        taskStartedAt[uid] = now
+        busySnapshots[uid] = BusySnapshot(
+            subTypeId: old.subTypeId,
+            actionType: actionType,
+            subTaskId: subTaskId,
+            lastCt: 0,
+            lastCtAt: now
+        )
     }
 
     func clear() { items = [] }

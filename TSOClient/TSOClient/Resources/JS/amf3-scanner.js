@@ -375,9 +375,10 @@
             if (shortCls === 'dServerActionResult' && typeof v.clientTime === 'number') {
                 ctx.serverClock = v.clientTime;
             }
-            // dPlayerVO.playerLevel arrives on zone load via dZoneVO.playersOnMap[0].
-            if (shortCls === 'dPlayerVO' && typeof v.playerLevel === 'number') {
-                ctx.playerLevel = v.playerLevel;
+            // dPlayerVO: capture player level and collect full VO for buff inventory extraction.
+            if (shortCls === 'dPlayerVO') {
+                if (typeof v.playerLevel === 'number') ctx.playerLevel = v.playerLevel;
+                ctx.playerVOs.push(v);
             }
             if (isCollectibleBuilding(v)) {
                 ctx.items.push(v);
@@ -425,6 +426,7 @@
             allBuildings: [],    // every dBuildingVO, for calibration data export
             destructed:   [],    // DestructBuildingResultVO instances (pickup events)
             specialists:  [],    // dSpecialistVO instances
+            playerVOs:    [],    // dPlayerVO instances (for buff inventory)
             serverClock:  null,  // dServerActionResult.clientTime (most recent in this response)
             playerLevel:  null,  // dPlayerVO.playerLevel (set on zone-load responses)
         };
@@ -453,7 +455,8 @@
         55: 'KeenerExplorer', 58: 'BoldExplorer', 61: 'ScaredExplorer',
         65: 'SnowyExplorer', 66: 'RomanticExplorer', 68: 'MotherlyExplorer',
         69: 'BenevolentExplorer', 70: 'RoyalExplorer', 74: 'PirateExplorer',
-        78: 'FluffyButteExplorer',
+        78: 'FluffyButteExplorer', 84: 'LoveStruckExplorer', 90: 'ChummyExplorer',
+        94: 'GhostExplorer', 97: 'NoraExplorer',
     };
     var GEOLOGIST_TYPES = {
         2: 'Geologist', 5: 'JollyGeologist', 26: 'ConscientiousGeologist',
@@ -463,10 +466,17 @@
         71: 'SophisticatedGeologist', 73: 'MummifiedGeologist', 76: 'GingerbreadGeologist',
         83: 'SootyGeologist', 86: 'BalancedGeologist',
     };
+    // Generals: only basic variants confirmed (0 and 3 both observed in live data).
+    // Premium variants are discovered the same way as explorers — the unmapped logger
+    // below surfaces any unknown subTypeId so they can be added here.
+    var GENERAL_TYPES = {
+        0: 'General', 3: 'General',
+    };
 
     function _subtypeNameFor(t) {
         if (EXPLORER_TYPES[t])  return EXPLORER_TYPES[t];
         if (GEOLOGIST_TYPES[t]) return GEOLOGIST_TYPES[t];
+        if (GENERAL_TYPES[t])   return GENERAL_TYPES[t];
         return null;
     }
 
@@ -484,7 +494,12 @@
         if (n.indexOf('geolog') >= 0)  return 'Geologist';
         if (n.indexOf('explor') >= 0)  return 'Explorer';
         if (n.indexOf('general') >= 0) return 'General';
-        return 'Unknown';
+        // Premium variant with unmapped numeric type. garrisonPos < 0 rules out
+        // General, so default to Explorer — most premium drops are explorers
+        // (e.g. Chummy/Ghost/LoveStruck/Nora Explorer). Misclassified Geologists
+        // will surface via server-side errorCode on dispatch; numeric IDs are
+        // logged below so EXPLORER_TYPES/GEOLOGIST_TYPES can be extended.
+        return 'Explorer';
     }
 
     // ArrayCollection / ObjectProxy decode to { __class, source:[...] } here; bare arrays
@@ -775,6 +790,8 @@
                     collectedTime: collectedTime,
                     bonusTime: bonusTime,
                     taskEndTime: taskEnd,
+                    taskActionType: (taskObj && typeof taskObj.type === 'number') ? taskObj.type : null,
+                    taskSubTaskID:  (taskObj && typeof taskObj.subTaskID === 'number') ? taskObj.subTaskID : null,
                 });
             }
             if (specItems.length > 0) {
@@ -787,6 +804,128 @@
                 webkit.messageHandlers.logger.postMessage(
                     '[AMF3:' + channel + '] specialists=' + specItems.length +
                     ' level=' + (window._tsoPlayerLevel != null ? window._tsoPlayerLevel : '?'));
+                // Diagnostic: surface premium variants whose numeric specialistType isn't
+                // in EXPLORER_TYPES/GEOLOGIST_TYPES/GENERAL_TYPES so they can be added
+                // (e.g. Chummy/Ghost/LoveStruck/Nora Explorer; premium Generals TBD).
+                // Match name_string against in-game UI to learn the ID. One line per
+                // zone load, only when unmapped exist.
+                var unmapped = [];
+                for (var ui = 0; ui < specItems.length; ui++) {
+                    var sit = specItems[ui];
+                    if (sit.subTypeId > 0 && !sit.subTypeName) {
+                        unmapped.push('type=' + sit.subTypeId +
+                                      ' cls=' + sit.specialistType +
+                                      ' name="' + (sit.name || '') + '"' +
+                                      ' idle=' + sit.isIdle +
+                                      ' uid=' + sit.uid);
+                    }
+                }
+                if (unmapped.length > 0) {
+                    webkit.messageHandlers.logger.postMessage(
+                        '[AMF3:spec:unmapped] ' + unmapped.length + ' premium variants:\n  ' +
+                        unmapped.join('\n  '));
+                }
+            }
+        }
+
+        // ── Buildings extraction ──────────────────────────────────────────────
+        // Only emit on full zone-load responses (those that also carried a dZoneVO
+        // with map dimensions). Incremental update responses carry at most a handful
+        // of buildings and should not replace the full list.
+        if (ctx.maps.length > 0 && ctx.allBuildings.length > 0) {
+            var buildingItems = [];
+            var loggedExemplar = false;
+            for (var bi = 0; bi < ctx.allBuildings.length; bi++) {
+                var b = ctx.allBuildings[bi];
+                var bGrid = detectPosition(b);
+                if (bGrid < 0) continue;
+                var bUid = uidObj(b);
+                var bSkin = (typeof b.skin === 'string') ? b.skin
+                          : (typeof b.buildingName_string === 'string') ? b.buildingName_string
+                          : '';
+                // Log the first non-collectible exemplar to discover all available fields.
+                if (!loggedExemplar && bSkin.indexOf('Collectible') < 0) {
+                    var bKeys = Object.keys(b).filter(function(k) { return k !== '__class'; });
+                    var bFields = bKeys.map(function(k) {
+                        var bv = b[k];
+                        if (bv === null || bv === undefined) return k + '=null';
+                        if (typeof bv === 'object') return k + '={cls:' + (bv.__class || '?') + '}';
+                        return k + '=' + bv;
+                    }).join(' | ');
+                    webkit.messageHandlers.logger.postMessage(
+                        '[AMF3:bldg:exemplar] skin=' + bSkin + ' | ' + bFields);
+                    loggedExemplar = true;
+                }
+                // Extract the first currently-applied buff name on this building.
+                var activeBuff = null;
+                var bBuffList = _unwrapCollection(b.buffs);
+                if (bBuffList.length > 0) {
+                    var bf0 = bBuffList[0];
+                    if (bf0 && typeof bf0.buffName_string === 'string') {
+                        activeBuff = bf0.buffName_string;
+                    } else if (!loggedExemplar) {
+                        webkit.messageHandlers.logger.postMessage(
+                            '[AMF3:bldg:buff] ' + JSON.stringify(bf0, null, 2).slice(0, 300));
+                    }
+                }
+                loggedExemplar = true;
+                buildingItems.push({
+                    gridIndex:  bGrid,
+                    skin:       bSkin,
+                    uid1:       (bUid && typeof bUid.uniqueID1 === 'number') ? bUid.uniqueID1 : 0,
+                    uid2:       (bUid && typeof bUid.uniqueID2 === 'number') ? bUid.uniqueID2 : 0,
+                    activeBuff: activeBuff,
+                });
+            }
+            if (buildingItems.length > 0) {
+                window._tsoSend('BUILDINGS', { items: buildingItems });
+                // Strip trailing _NNN level suffix to group by base type, then log sorted summary.
+                var skinCounts = {};
+                for (var si = 0; si < buildingItems.length; si++) {
+                    var base = buildingItems[si].skin.replace(/_\d+$/, '');
+                    skinCounts[base] = (skinCounts[base] || 0) + 1;
+                }
+                var skinSummary = Object.keys(skinCounts).sort().map(function(k) {
+                    return k + ' x' + skinCounts[k];
+                }).join('\n  ');
+                webkit.messageHandlers.logger.postMessage(
+                    '[AMF3:buildings] total=' + buildingItems.length + '\n  ' + skinSummary);
+            }
+        }
+
+        // ── Buff inventory extraction ─────────────────────────────────────────
+        // availableBuffs_vector lives on dPlayerVO. Emit BUFFS bridge message and
+        // log a sample whenever the inventory is non-empty.
+        for (var pi = 0; pi < ctx.playerVOs.length; pi++) {
+            var pvo = ctx.playerVOs[pi];
+            var buffList = _unwrapCollection(pvo.availableBuffs_vector);
+            if (buffList.length === 0) continue;
+            var buffItems = [];
+            for (var bfi = 0; bfi < buffList.length; bfi++) {
+                var bf = buffList[bfi];
+                if (!bf) continue;
+                buffItems.push({
+                    uid1:         (typeof bf.uniqueId1 === 'number') ? bf.uniqueId1 : 0,
+                    uid2:         (typeof bf.uniqueId2 === 'number') ? bf.uniqueId2 : 0,
+                    buffName:     (typeof bf.buffName_string   === 'string') ? bf.buffName_string   : '',
+                    resourceName: (typeof bf.resourceName_string === 'string') ? bf.resourceName_string : '',
+                    amount:       (typeof bf.amount === 'number') ? bf.amount : 0,
+                    insertedAt:   (typeof bf.insertedAt === 'number') ? bf.insertedAt : 0,
+                });
+            }
+            if (buffItems.length > 0) {
+                window._tsoSend('BUFFS', { items: buffItems });
+                // Count instances per buff name for easy analysis.
+                var buffCounts = {};
+                for (var bci = 0; bci < buffItems.length; bci++) {
+                    var bn = buffItems[bci].buffName || '(unknown)';
+                    buffCounts[bn] = (buffCounts[bn] || 0) + 1;
+                }
+                var buffSummary = Object.keys(buffCounts).sort().map(function(k) {
+                    return k + ' x' + buffCounts[k];
+                }).join(', ');
+                webkit.messageHandlers.logger.postMessage(
+                    '[AMF3:buffs] total=' + buffItems.length + ' | ' + buffSummary);
             }
         }
 
@@ -820,12 +959,35 @@
             var wantAMF = url.includes('GameServer') ||
                           ct.includes('amf') ||
                           ct.includes('octet-stream');
-            if (!wantAMF) return response;
-            response.clone().arrayBuffer().then(function(buf) {
-                if (buf.byteLength > 3) analyzeAMFBuffer(buf, 'fetch');
-            }).catch(function(e) {
-                webkit.messageHandlers.logger.postMessage('[AMF3:fetch] buffer error: ' + e);
-            });
+            if (wantAMF) {
+                response.clone().arrayBuffer().then(function(buf) {
+                    if (buf.byteLength > 3) analyzeAMFBuffer(buf, 'fetch');
+                }).catch(function(e) {
+                    webkit.messageHandlers.logger.postMessage('[AMF3:fetch] buffer error: ' + e);
+                });
+            } else if (ct.includes('json') || ct.includes('javascript')) {
+                // Scan non-AMF JSON/JS responses once per URL for task config data.
+                var scanKey = 'tsoCfgScanned:' + url;
+                if (!window[scanKey]) {
+                    window[scanKey] = true;
+                    response.clone().text().then(function(text) {
+                        var lower = text.toLowerCase();
+                        var hasDuration = lower.indexOf('duration') >= 0 ||
+                                         lower.indexOf('specialist') >= 0 ||
+                                         lower.indexOf('explorer') >= 0 ||
+                                         lower.indexOf('geologist') >= 0 ||
+                                         lower.indexOf('tasktime') >= 0 ||
+                                         lower.indexOf('task_time') >= 0 ||
+                                         lower.indexOf('findtreasure') >= 0 ||
+                                         lower.indexOf('findeventzone') >= 0;
+                        if (hasDuration) {
+                            webkit.messageHandlers.logger.postMessage(
+                                '[AMF3:cfg] JSON hit: ' + url.slice(0, 200) +
+                                ' | sample: ' + text.slice(0, 400));
+                        }
+                    }).catch(function(){});
+                }
+            }
             return response;
         });
     };
