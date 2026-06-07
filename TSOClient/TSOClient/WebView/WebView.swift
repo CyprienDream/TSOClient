@@ -3,11 +3,7 @@ import WebKit
 
 struct WebView: NSViewRepresentable {
     let url: URL
-    var store: CollectiblesStore
-    var specialistsStore: SpecialistsStore
-    var buildingsStore: BuildingsStore
-    var buffsStore: BuffsStore
-    var sender: BridgeSender
+    var env: AppEnvironment
 
     func makeNSView(context: Context) -> WKWebView {
         let config = WKWebViewConfiguration()
@@ -29,7 +25,7 @@ struct WebView: NSViewRepresentable {
 
         webView.isInspectable = true
         context.coordinator.webView = webView
-        sender.webView = webView  // Assign before any UI can trigger a dispatch.
+        env.sender.webView = webView  // Assign before any UI can trigger a dispatch.
         return webView
     }
 
@@ -40,7 +36,6 @@ struct WebView: NSViewRepresentable {
     }
 
     func makeCoordinator() -> WebViewCoordinator {
-        WebViewCoordinator(store: store, specialistsStore: specialistsStore,
-                           buildingsStore: buildingsStore, buffsStore: buffsStore)
+        WebViewCoordinator(env: env)
     }
 }

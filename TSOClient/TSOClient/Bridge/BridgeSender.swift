@@ -5,11 +5,19 @@ import WebKit
 final class BridgeSender {
     weak var webView: WKWebView?
 
-    func send(_ msg: OutboundMessage) {
+    func send(_ command: OutboundCommand) {
         guard let webView else {
             print("[BridgeSender] webView is nil — message dropped")
             return
         }
-        msg.send(to: webView)
+        guard let js = renderJSExpression(for: command) else {
+            print("[BridgeSender] failed to encode payload for \(command.type)")
+            return
+        }
+        webView.evaluateJavaScript(js) { _, error in
+            if let error {
+                print("[BridgeSender] JS error: \(error)")
+            }
+        }
     }
 }
