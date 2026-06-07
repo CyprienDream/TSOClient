@@ -11,54 +11,8 @@ struct BuffsPanel: View {
     // Master picker selection; when changed, overrides every category's selection.
     @State private var masterBuff: String = ""
 
-    struct BuildingCategory: Identifiable {
-        var id: String { displayName }
-        let displayName: String
-        let skinBases: [String]
-    }
-
-    // Curated categories shown in the panel. Order is the display order.
-    // A category with zero matching buildings is hidden.
-    private static let categories: [BuildingCategory] = [
-        .init(displayName: "Stone Mason",            skinBases: ["Mason"]),
-        .init(displayName: "Granite Mason",          skinBases: ["GraniteMason"]),
-        .init(displayName: "Marble Mason",           skinBases: ["MarbleMason"]),
-        .init(displayName: "Brewery",                skinBases: ["Brewery"]),
-        .init(displayName: "Exotic Wood Cutter",     skinBases: ["ExoticWoodCutter"]),
-        .init(displayName: "Exotic Wood Forester",   skinBases: ["ExoticWoodForester"]),
-        .init(displayName: "Exotic Wood Sawmill",    skinBases: ["ExoticWoodSawmill"]),
-        .init(displayName: "Weaver",                 skinBases: ["Weaver"]),
-        .init(displayName: "Homestead",              skinBases: ["Homestead"]),
-        .init(displayName: "Elite Stable",           skinBases: ["EliteStable"]),
-        .init(displayName: "Stables",                skinBases: ["Stable"]),
-        .init(displayName: "Papermill (All)",        skinBases: ["PapermillSimple", "PapermillIntermediate", "PapermillAdvanced"]),
-        .init(displayName: "Watermill (Normal + Improved)", skinBases: ["Watermill", "ImprovedWatermill"]),
-        .init(displayName: "Platinum Weaponsmith",   skinBases: ["PlatinumWeaponsmith"]),
-        .init(displayName: "Finesmith",              skinBases: ["Finesmith", "Elari_Finesmith"]),
-        .init(displayName: "Fish Farm",              skinBases: ["FishFarm"]),
-        .init(displayName: "Fisherman",              skinBases: ["Fisher"]),
-        .init(displayName: "Hunter",                 skinBases: ["Hunter"]),
-        .init(displayName: "Deerstalker Hut",        skinBases: ["DeerstalkerHut"]),
-        .init(displayName: "Coking Plant",           skinBases: ["CokingPlant"]),
-        .init(displayName: "Rabbit Retreat",         skinBases: ["RabbitBreeding"]),
-        .init(displayName: "Recycling Manufactory",  skinBases: ["RecyclingManufactory"]),
-        .init(displayName: "Butcher (Normal + Improved)", skinBases: ["Butcher", "ImprovedButcher"]),
-        .init(displayName: "Gold Tower",             skinBases: ["GoldTower"]),
-        .init(displayName: "Mountain Clan Colossus", skinBases: ["MountainClanColossus"]),
-        .init(displayName: "Copper Smelter",         skinBases: ["BronzeSmelter"]),
-        .init(displayName: "Iron Smelter",           skinBases: ["IronSmelter"]),
-        .init(displayName: "Platinum Smelter",       skinBases: ["PlatinumSmelter"]),
-        .init(displayName: "Steel Smelter",          skinBases: ["SteelForge"]),
-        .init(displayName: "Coinage",                skinBases: ["Coinage"]),
-        .init(displayName: "Farm (Normal + Improved)",   skinBases: ["Farm", "ImprovedFarm"]),
-        .init(displayName: "Silo (Normal + Improved)",   skinBases: ["silo", "ImprovedSilo"]),
-        .init(displayName: "Sunflower Farm",         skinBases: ["SunflowerFarm"]),
-        .init(displayName: "Bakery (Normal + Improved)", skinBases: ["Bakery", "ImprovedBakery"]),
-        .init(displayName: "Mill (Normal + Improved)",   skinBases: ["Miller", "ImprovedMill"]),
-    ]
-
     private var groups: [(category: BuildingCategory, buildings: [BuildingsStore.BuildingItem])] {
-        BuffsPanel.categories.compactMap { category in
+        BuildingCategoryRegistry.categories.compactMap { category in
             let buildings = buildingsStore.buildings(matchingSkinBases: category.skinBases)
             return buildings.isEmpty ? nil : (category, buildings)
         }
@@ -199,12 +153,9 @@ struct BuffsPanel: View {
     // The server decrements the stack amount on each call.
     private func buffAll(group: [BuildingsStore.BuildingItem], buffName: String) {
         guard let buff = buffsStore.item(for: buffName) else { return }
-        Task { @MainActor in
-            for (i, building) in group.enumerated() {
-                print("[BuffAll] \(i + 1)/\(group.count) grid=\(building.gridIndex) buff=\(buff.uid1):\(buff.uid2)")
-                onDispatch(buff.uid1, buff.uid2, building.gridIndex)
-                try? await Task.sleep(nanoseconds: 80_000_000)
-            }
+        BulkDispatcher.run(items: group) { i, building in
+            print("[BuffAll] \(i + 1)/\(group.count) grid=\(building.gridIndex) buff=\(buff.uid1):\(buff.uid2)")
+            onDispatch(buff.uid1, buff.uid2, building.gridIndex)
         }
     }
 

@@ -1,18 +1,28 @@
 import WebKit
 
 // Loads the active JS modules from Resources/JS/ in the required injection
-// order: bridge → scanner → encoder → patcher → unity-probe.
+// order: bridge → parser → classifier → scanner → net → encoder → patcher → unity-probe.
 enum JSInjection {
 
-    // Injection order: bridge → scanner → encoder → patcher → unity-probe.
-    // The patcher must run after the scanner because it wraps the scanner's
-    // already-patched window.fetch. DO NOT reorder.
-    // unity-probe runs last; it only touches window.createUnityInstance / SendMessage
-    // and does not interfere with the fetch chain.
+    // Injection order matters:
+    //   bridge      — sets up window.TSOBridge + window._tsoSend
+    //   amf3-parser — defines window._TSOAMFParser
+    //   amf3-classifier — defines window._tsoClassifier (subtype tables + learn)
+    //   amf3-scanner — defines window._tsoScanner.analyzeAMFBuffer
+    //   amf3-net    — wraps window.fetch + XMLHttpRequest, calls scanner
+    //   amf3-encoder — defines window._TSORPC (uses _TSOAMFParser, _tsoAuthCtx)
+    //   collectible-patcher — wraps window.fetch AGAIN (must run after amf3-net
+    //     so it wraps the already-wrapped fetch; otherwise AMF3 parsing on
+    //     non-collectible URLs breaks). DO NOT reorder.
+    //   unity-probe — touches window.createUnityInstance only; ordering relative
+    //     to the fetch chain doesn't matter.
     static func install(into controller: WKUserContentController) {
         let sources = [
             load("bridge"),
+            load("amf3-parser"),
+            load("amf3-classifier"),
             load("amf3-scanner"),
+            load("amf3-net"),
             load("amf3-encoder"),
             resolvePatched("collectible-patcher"),
             load("unity-probe"),

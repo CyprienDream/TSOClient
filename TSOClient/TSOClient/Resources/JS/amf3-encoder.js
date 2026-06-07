@@ -169,6 +169,39 @@
         return ab;
     };
 
+    // ── Trait DSL ─────────────────────────────────────────────────────────
+    //
+    // Each VO class has a fixed AMF3 trait member order observed on the wire.
+    // The writer encodes Object.keys(v) in insertion order, so JS object
+    // literals work — but a reorder by a future editor silently breaks the
+    // wire format. `trait(cls, members)` mechanically enforces the order:
+    // pass values positionally and the resulting object always has the same
+    // key sequence.
+    function trait(cls, members) {
+        return function(values) {
+            var o = { __class: cls };
+            for (var i = 0; i < members.length; i++) {
+                o[members[i]] = values[i];
+            }
+            return o;
+        };
+    }
+
+    var dUniqueID = trait('defaultGame.Communication.VO.dUniqueID',
+        ['uniqueID1', 'uniqueID2']);
+    var dStartSpecialistTaskVO = trait('defaultGame.Communication.VO.dStartSpecialistTaskVO',
+        ['uniqueID', 'subTaskID', 'paramString']);
+    var dServerAction = trait('defaultGame.Communication.VO.dServerAction',
+        ['type', 'grid', 'endGrid', 'data']);
+    var dServerCall = trait('defaultGame.Communication.VO.dServerCall',
+        ['type', 'zoneID', 'data', 'dsoAuthUser', 'dsoAuthToken', 'dsoAuthRandomClientID']);
+    // headers VO uses empty __class on the wire.
+    var dMessageHeaders = trait('', ['DSEndpoint', 'DSId']);
+    var dRemotingMessage = trait('flex.messaging.messages.RemotingMessage',
+        ['source', 'operation', 'parameters', 'remoteUsername', 'remotePassword',
+         'correlationId', 'body', 'clientId', 'destination', 'headers',
+         'messageId', 'timestamp', 'timeToLive']);
+
     // ── _TSORPC namespace ─────────────────────────────────────────────────
 
     var _counterOffset = 0;  // increments each dispatch to stay distinct within a session
@@ -223,78 +256,53 @@
         });
     }
 
-    // Build the full RemotingMessage → dServerCall → dServerAction → VO chain
-    // and POST it. opcode=95 for specialist tasks.
-    // subTaskID encodes the deposit/task type (0 = default / any).
-    // Key order in each object literal must match the observed trait member order.
-    function dispatchSpecialist(opts) {
+    function requireAuthCtx(tag) {
         var ctx = window._tsoAuthCtx;
         if (!ctx || !ctx.dsoAuthToken) {
             webkit.messageHandlers.logger.postMessage(
-                '[_TSORPC] auth not ready — make a manual game action first');
-            return Promise.reject(new Error('auth not ready'));
+                tag + ' auth not ready — make a manual game action first');
+            return null;
         }
+        return ctx;
+    }
 
-        var uid1      = opts.uid1 | 0;
-        var uid2      = opts.uid2 | 0;
-        var subTaskID = (opts.taskCode !== undefined ? opts.taskCode : (opts.subTaskID | 0));
-        var grid      = opts.targetGrid | 0;
-        var endGrid   = opts.endGrid    | 0;
+    // Wrap a dServerCall in the standard RemotingMessage envelope.
+    function buildRemotingMessage(ctx, call) {
+        var headers = dMessageHeaders(['SMC-Endpoint', ctx.DSId]);
+        return dRemotingMessage([
+            'com.bluebyte.game.servlet.EventHandler',  // source
+            'ExecuteServerCall',                       // operation
+            null, null, null, null,                    // parameters, remoteUsername, remotePassword, correlationId
+            [call],                                    // body
+            null,                                      // clientId
+            'SMC',                                     // destination
+            headers,
+            uuid(),                                    // messageId
+            0,                                         // timestamp
+            0,                                         // timeToLive
+        ]);
+    }
 
-        // ── VO objects — member key order matches observed AMF3 trait definitions ──
+    // opcode=95 — start a specialist task. subTaskID encodes deposit/task type.
+    function dispatchSpecialist(opts) {
+        var ctx = requireAuthCtx('[_TSORPC]');
+        if (!ctx) return Promise.reject(new Error('auth not ready'));
 
-        var uniqueID = {
-            __class:   'defaultGame.Communication.VO.dUniqueID',
-            uniqueID1: uid1,
-            uniqueID2: uid2,
-        };
-        var taskVO = {
-            __class:     'defaultGame.Communication.VO.dStartSpecialistTaskVO',
-            uniqueID:    uniqueID,
-            subTaskID:   subTaskID,
-            paramString: null,
-        };
-        var action = {
-            __class:  'defaultGame.Communication.VO.dServerAction',
-            type:     (opts.actionType !== undefined ? opts.actionType : 0) | 0,
-            grid:     grid,
-            endGrid:  endGrid,
-            data:     taskVO,
-        };
-        var call = {
-            __class:               'defaultGame.Communication.VO.dServerCall',
-            type:                  95,
-            zoneID:                ctx.zoneID,
-            data:                  action,
-            dsoAuthUser:           ctx.dsoAuthUser,
-            dsoAuthToken:          ctx.dsoAuthToken,
-            dsoAuthRandomClientID: ctx.dsoAuthRandomClientID,
-        };
-        var headers = {
-            __class:    '',
-            DSEndpoint: 'SMC-Endpoint',
-            DSId:       ctx.DSId,
-        };
-        var msg = {
-            __class:        'flex.messaging.messages.RemotingMessage',
-            source:         'com.bluebyte.game.servlet.EventHandler',
-            operation:      'ExecuteServerCall',
-            parameters:     null,
-            remoteUsername: null,
-            remotePassword: null,
-            correlationId:  null,
-            body:           [call],
-            clientId:       null,
-            destination:    'SMC',
-            headers:        headers,
-            messageId:      uuid(),
-            timestamp:      0,
-            timeToLive:     0,
-        };
+        var uid1       = opts.uid1 | 0;
+        var uid2       = opts.uid2 | 0;
+        var subTaskID  = (opts.taskCode !== undefined ? opts.taskCode : (opts.subTaskID | 0));
+        var grid       = opts.targetGrid | 0;
+        var endGrid    = opts.endGrid    | 0;
+        var actionType = ((opts.actionType !== undefined ? opts.actionType : 0) | 0);
+
+        var taskVO = dStartSpecialistTaskVO([dUniqueID([uid1, uid2]), subTaskID, null]);
+        var action = dServerAction([actionType, grid, endGrid, taskVO]);
+        var call   = dServerCall([95, ctx.zoneID, action, ctx.dsoAuthUser, ctx.dsoAuthToken, ctx.dsoAuthRandomClientID]);
+        var msg    = buildRemotingMessage(ctx, call);
 
         webkit.messageHandlers.logger.postMessage(
             '[_TSORPC] dispatch uid=' + uid1 + ':' + uid2 +
-            ' actionType=' + action.type + ' subTaskID=' + subTaskID +
+            ' actionType=' + actionType + ' subTaskID=' + subTaskID +
             ' zone=' + ctx.zoneID + ' DSId=' + (ctx.DSId || '?').slice(0, 16) +
             ' clientID=' + ctx.dsoAuthRandomClientID +
             ' url=' + (getRealmUrl() || '?').slice(0, 80));
@@ -315,64 +323,20 @@
         });
     }
 
-    // Dispatch a buff to a single building.
-    // Wire format mirrors dispatchSpecialist but uses callType=61 with a bare
-    // dUniqueID as the action data (observed from game traffic; no building-type
-    // encoding needed).
+    // opcode=61 — apply a buff. action.data is a bare dUniqueID identifying the
+    // buff stack; no building-type encoding needed (verified from game traffic).
     function dispatchBuff(opts) {
-        var ctx = window._tsoAuthCtx;
-        if (!ctx || !ctx.dsoAuthToken) {
-            webkit.messageHandlers.logger.postMessage(
-                '[_TSORPC:buff] auth not ready — make a manual game action first');
-            return Promise.reject(new Error('auth not ready'));
-        }
+        var ctx = requireAuthCtx('[_TSORPC:buff]');
+        if (!ctx) return Promise.reject(new Error('auth not ready'));
 
-        var buffUid1  = opts.buffUid1  | 0;
-        var buffUid2  = opts.buffUid2  | 0;
-        var grid      = opts.targetGrid | 0;
+        var buffUid1 = opts.buffUid1 | 0;
+        var buffUid2 = opts.buffUid2 | 0;
+        var grid     = opts.targetGrid | 0;
 
-        var buffUniqueID = {
-            __class:   'defaultGame.Communication.VO.dUniqueID',
-            uniqueID1: buffUid1,
-            uniqueID2: buffUid2,
-        };
-        var action = {
-            __class:  'defaultGame.Communication.VO.dServerAction',
-            type:     0,
-            grid:     grid,
-            endGrid:  0,
-            data:     buffUniqueID,
-        };
-        var call = {
-            __class:               'defaultGame.Communication.VO.dServerCall',
-            type:                  61,
-            zoneID:                ctx.zoneID,
-            data:                  action,
-            dsoAuthUser:           ctx.dsoAuthUser,
-            dsoAuthToken:          ctx.dsoAuthToken,
-            dsoAuthRandomClientID: ctx.dsoAuthRandomClientID,
-        };
-        var headers = {
-            __class:    '',
-            DSEndpoint: 'SMC-Endpoint',
-            DSId:       ctx.DSId,
-        };
-        var msg = {
-            __class:        'flex.messaging.messages.RemotingMessage',
-            source:         'com.bluebyte.game.servlet.EventHandler',
-            operation:      'ExecuteServerCall',
-            parameters:     null,
-            remoteUsername: null,
-            remotePassword: null,
-            correlationId:  null,
-            body:           [call],
-            clientId:       null,
-            destination:    'SMC',
-            headers:        headers,
-            messageId:      uuid(),
-            timestamp:      0,
-            timeToLive:     0,
-        };
+        var buffID = dUniqueID([buffUid1, buffUid2]);
+        var action = dServerAction([0, grid, 0, buffID]);
+        var call   = dServerCall([61, ctx.zoneID, action, ctx.dsoAuthUser, ctx.dsoAuthToken, ctx.dsoAuthRandomClientID]);
+        var msg    = buildRemotingMessage(ctx, call);
 
         webkit.messageHandlers.logger.postMessage(
             '[_TSORPC:buff] buffUid=' + buffUid1 + ':' + buffUid2 +

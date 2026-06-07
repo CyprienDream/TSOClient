@@ -36,49 +36,69 @@ TSOClient/                      ← Xcode project root
   TSOClient/                    ← source root (synchronized folder group — no pbxproj edits needed
     TSOClientApp.swift          ← @main, window 1280×900
     App/
-      ContentView.swift         ← SwiftUI root (HSplitView + @State stores + BridgeSender)
+      ContentView.swift         ← SwiftUI root (HSplitView + @State AppEnvironment)
+      AppEnvironment.swift      ← bag of stores + BridgeSender, threaded through WebView/Router
     WebView/
-      WebView.swift             ← NSViewRepresentable wrapper
+      WebView.swift             ← NSViewRepresentable wrapper (takes AppEnvironment)
       WebViewCoordinator.swift  ← WKUIDelegate + WKNavDelegate + WKScriptMessageHandler
       JSInjection.swift         ← loads JS modules from bundle in injection order
-      BridgeRouter.swift        ← maps InboundMessage → store mutations
+      BridgeRouter.swift        ← maps InboundMessage → store mutations on env
     Bridge/
-      InboundMessage.swift      ← JS→Swift message enum + payload decoders
-      OutboundMessage.swift     ← Swift→JS message enum + send(to:)
-      BridgeSender.swift        ← @Observable; owns weak WKWebView ref for typed dispatch
+      InboundMessage.swift      ← JS→Swift message enum + Codable payloads
+      OutboundMessage.swift     ← OutboundCommand protocol + DispatchSpecialist/Buff structs + JS template
+      BridgeSender.swift        ← @Observable; owns weak WKWebView ref; sends OutboundCommand
     Features/
       Collectibles/
         CollectiblesStore.swift ← @Observable collectible items + map dims
       Specialists/
-        SpecialistsStore.swift  ← @Observable specialist list
-        SpecialistsPanel.swift  ← SwiftUI side panel + SpecialistRow
-        SpecialistTasks.swift   ← GeologistTask + ExplorerTask enums
+        SpecialistKind.swift            ← enum Explorer/Geologist/General/Unknown
+        SpecialistsStore.swift          ← @Observable specialist list + duration learning
+        SpecialistsPanel.swift          ← SwiftUI side panel
+        SpecialistRow.swift             ← per-row View
+        SpecialistTasks.swift           ← GeologistTask + ExplorerTask enums
+        SpecialistTaskAvailability.swift ← TaskCode/SpecialistKind extensions (availability, defaults)
+      Buffs/
+        BuffsPanel.swift                ← SwiftUI side panel
+        BuffsStore.swift                ← @Observable buff inventory (indexed)
+        BuildingsStore.swift            ← @Observable building list (indexed by skinBase)
+        BuildingCategoryRegistry.swift  ← loads building-categories.json at startup
+    Utilities/
+      String+CamelCase.swift            ← "PirateExplorer" → "Pirate Explorer"
+      DurationFormatter.swift           ← seconds → "1d 2h 03m" / "5m 30s"
+      BulkDispatcher.swift              ← sequential dispatch loop w/ 80 ms gap
     Resources/
       JS/
         bridge.js               ← window._tsoSend + window.TSOBridge
-        amf3-scanner.js         ← AMF3 deserialiser, fetch/XHR interception, auth caching
-        amf3-encoder.js         ← AMF3 serialiser + _TSORPC.dispatchSpecialist
+        amf3-parser.js          ← AMFParser (AMF0/AMF3 deserializer) — window._TSOAMFParser
+        amf3-classifier.js      ← specialist subtype tables + classifySpec + learnFromOutbound — window._tsoClassifier
+        amf3-scanner.js         ← walker + extractors + analyzeAMFBuffer — window._tsoScanner
+        amf3-net.js             ← fetch/XHR wraps + auth caching + outbound capture (uses _tsoScanner)
+        amf3-encoder.js         ← trait DSL + _TSORPC.dispatchSpecialist / dispatchBuff
         collectible-patcher.js  ← returns pink PNG for 55 known collectible hashes
         unity-probe.js          ← captures the Unity instance, exposes as window._tsoUnity (recon completed; see log.md)
       Data/
         collectible-hashes.json ← 55 SHA-1 hashes (substituted into patcher at load time)
+        building-categories.json ← buff-panel building-group definitions
     Info.plist                  ← NSAllowsArbitraryLoads = true (game CDN needs it)
     TSOClient.entitlements      ← sandbox + network.client
 ```
 
 ## Architecture in one paragraph
 
-`WebView` loads `thesettlersonline.com`. `JSInjection` installs five JS modules at `atDocumentStart` in dependency order: **bridge.js** (sets up `window.TSOBridge` for Swift→JS and `window._tsoSend` for JS→Swift), **amf3-scanner.js** (wraps `window.fetch` and `XMLHttpRequest`, deserialises GameServer AMF3 binary responses, emits `COLLECTIBLES` and `SPECIALISTS` messages, caches auth context in `window._tsoAuthCtx`), **amf3-encoder.js** (AMF3 serialiser, builds `RemotingMessage` envelopes, exposes `_TSORPC.dispatchSpecialist` and registers the `DISPATCH_SPECIALIST` TSOBridge handler), **collectible-patcher.js** (wraps `fetch` + `XHR`; for 55 known collectible building-texture hashes returns a 32×32 hot-pink synthetic PNG so Unity renders those buildings pink in-world), **unity-probe.js** (uses a `MutationObserver` between `<script>` tags to wrap `window.createUnityInstance` and capture the Unity instance, exposing it as `window._tsoUnity`; the in-game UI refresh recon that motivated this probe concluded the JS bridge can't drive Unity's specialist UI — see `log.md`). JS→Swift uses two named `WKScriptMessageHandler` channels: `"logger"` (raw strings) and `"tso"` (structured `{type, payload}` JSON). Swift→JS goes through `BridgeSender.send(_ msg: OutboundMessage)`, which calls `webView.evaluateJavaScript(msg.jsExpression)`. `BridgeRouter` maps decoded `InboundMessage` values to store mutations on the main thread.
+`WebView` loads `thesettlersonline.com`. `JSInjection` installs eight JS modules at `atDocumentStart` in dependency order: **bridge.js** (sets up `window.TSOBridge` for Swift→JS and `window._tsoSend` for JS→Swift), **amf3-parser.js** (AMF0/AMF3 deserializer exposed as `window._TSOAMFParser`), **amf3-classifier.js** (specialist subtype tables + classification + outbound type-hint learning, exposed as `window._tsoClassifier`), **amf3-scanner.js** (tree walker + per-VO extractors + `analyzeAMFBuffer`, exposed as `window._tsoScanner`), **amf3-net.js** (wraps `window.fetch` and `XMLHttpRequest`, hands inbound buffers to the scanner and outbound bodies to the classifier; caches auth context in `window._tsoAuthCtx`), **amf3-encoder.js** (trait-DSL AMF3 serialiser, builds `RemotingMessage` envelopes, exposes `_TSORPC.dispatchSpecialist`/`dispatchBuff` and registers the `DISPATCH_SPECIALIST`/`DISPATCH_BUFF` TSOBridge handlers), **collectible-patcher.js** (wraps `fetch` + `XHR`; for 55 known collectible building-texture hashes returns a 32×32 hot-pink synthetic PNG so Unity renders those buildings pink in-world), **unity-probe.js** (uses a `MutationObserver` between `<script>` tags to wrap `window.createUnityInstance` and capture the Unity instance, exposing it as `window._tsoUnity`; the in-game UI refresh recon that motivated this probe concluded the JS bridge can't drive Unity's specialist UI — see `log.md`). JS→Swift uses two named `WKScriptMessageHandler` channels: `"logger"` (raw strings) and `"tso"` (structured `{type, payload}` JSON, decoded with Codable in `InboundMessage.decode`). Swift→JS goes through `BridgeSender.send(_ command: OutboundCommand)`, which JSON-encodes the payload and calls `webView.evaluateJavaScript(...)`. `BridgeRouter` maps decoded `InboundMessage` values to store mutations on the main thread via the `AppEnvironment`.
 
 ## Bridge protocol
 
 **JS → Swift (`"tso"` handler):**
 - `COLLECTIBLES` — `{mapWidth, mapHeight, items:[{gridIndex,x,y,assetName}]}`
 - `GAME_STATE`   — `{state:"LOADED"|"ZONE_CHANGED"|"ZONE_LEFT", zoneId?}`
-- `SPECIALISTS`  — `{items:[{uid,uid1,uid2,specialistType,name,isIdle,taskEndTime?}]}`
+- `SPECIALISTS`  — `{items:[{uid,uid1,uid2,specialistType,subTypeId,subTypeName?,name,isIdle,skills,collectedTime?,bonusTime?,taskEndTime?,taskActionType?,taskSubTaskID?}], playerLevel?, serverTime?}`
+- `BUILDINGS`    — `{items:[{gridIndex,skin,uid1,uid2,activeBuff?}]}`
+- `BUFFS`        — `{items:[{uid1,uid2,buffName,resourceName,amount,insertedAt}]}`
 
-**Swift → JS (`BridgeSender.send(_:)` → `OutboundMessage.jsExpression`):**
+**Swift → JS (`BridgeSender.send(_:)` with an `OutboundCommand`):**
 - `DISPATCH_SPECIALIST` — `{uid1, uid2, actionType, taskCode, targetGrid}` → handled by `amf3-encoder.js`
+- `DISPATCH_BUFF`       — `{buffUid1, buffUid2, targetGrid}` → handled by `amf3-encoder.js`
 
 ## Highlighting approach
 
@@ -89,8 +109,8 @@ The canvas overlay approach was abandoned in Iteration 7 because Unity renders v
 ## Key invariants
 
 - `WebView.updateNSView` guards `webView.url == nil` — do not remove this or the game reloads on every SwiftUI state change.
-- JS injection order: **bridge → scanner → encoder → patcher → unity-probe**. The patcher must run **after** the scanner because it wraps the scanner's already-patched `window.fetch`; reversing the order breaks AMF3 parsing on non-collectible URLs. The probe runs last; it touches only `window.createUnityInstance` / `SendMessage` so its order relative to the fetch chain doesn't matter.
-- AMF3 VO object-literal member order in `amf3-encoder.js` is load-bearing (trait registration is order-dependent on the wire).
+- JS injection order: **bridge → amf3-parser → amf3-classifier → amf3-scanner → amf3-net → amf3-encoder → collectible-patcher → unity-probe**. The patcher must run **after** amf3-net because it wraps `window.fetch` *again* — reversing the order breaks AMF3 parsing on non-collectible URLs. amf3-scanner depends on `window._TSOAMFParser` and `window._tsoClassifier`; amf3-net depends on `window._tsoScanner`. The probe runs last; it touches only `window.createUnityInstance` / `SendMessage` so its order relative to the fetch chain doesn't matter.
+- AMF3 VO trait member order is load-bearing on the wire. `amf3-encoder.js` enforces it mechanically via the `trait(cls, members)` DSL — DO NOT reorder member arrays.
 - `WKUserContentController.add(_:name:)` retains the handler — `WebViewCoordinator` is `NSObject`, no extra wrapper needed.
 - `@Observable` (Swift 5.9 macro, not `ObservableObject`). Use `@State` at the owner site; the class reference propagates automatically.
 

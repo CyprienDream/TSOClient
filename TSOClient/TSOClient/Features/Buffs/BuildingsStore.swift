@@ -19,13 +19,7 @@ final class BuildingsStore {
 
         var displayName: String {
             if let known = BuildingItem.knownNames[skinBase] { return known }
-            // Fallback: insert spaces before uppercase runs (CamelCase → words).
-            var out = ""
-            for (i, ch) in skinBase.enumerated() {
-                if i > 0 && ch.isUppercase { out.append(" ") }
-                out.append(ch)
-            }
-            return out.isEmpty ? skinBase : out
+            return skinBase.camelCaseToWords
         }
 
         private static let knownNames: [String: String] = [

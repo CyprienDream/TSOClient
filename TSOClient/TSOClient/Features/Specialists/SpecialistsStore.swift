@@ -33,7 +33,7 @@ final class SpecialistsStore {
         let id: String          // "uid1:uid2"
         let uid1: Int
         let uid2: Int
-        let specialistType: String      // "Explorer" | "Geologist" | "General" | "Unknown"
+        let specialistType: SpecialistKind
         let subTypeId: Int              // -1 if absent
         let subTypeName: String?        // CamelCase canonical name, e.g. "PirateExplorer"
         let name: String                // player's custom name (may be empty)
@@ -49,15 +49,10 @@ final class SpecialistsStore {
             if let raw = subTypeName, !raw.isEmpty {
                 if raw == "Explorer" { return "Basic Explorer" }
                 if raw == "General"  { return "Basic General" }
-                var out = ""
-                for (i, ch) in raw.enumerated() {
-                    if i > 0 && ch.isUppercase { out.append(" ") }
-                    out.append(ch)
-                }
-                return out
+                return raw.camelCaseToWords
             }
-            if subTypeId > 0 { return "\(specialistType) #\(subTypeId)" }
-            return specialistType
+            if subTypeId > 0 { return "\(specialistType.rawValue) #\(subTypeId)" }
+            return specialistType.rawValue
         }
 
         var displayPrimary: String {

@@ -33,13 +33,7 @@ final class BuffsStore {
         ]
 
         static func computeDisplayName(_ buffName: String) -> String {
-            if let known = knownNames[buffName] { return known }
-            var out = ""
-            for (i, ch) in buffName.enumerated() {
-                if i > 0 && ch.isUppercase { out.append(" ") }
-                out.append(ch)
-            }
-            return out.isEmpty ? buffName : out
+            knownNames[buffName] ?? buffName.camelCaseToWords
         }
     }
 
