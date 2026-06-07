@@ -16,7 +16,6 @@
 		B4FD0DFA2FA172C400272AE1 /* CLAUDE.md */ = {isa = PBXFileReference; lastKnownFileType = net.daringfireball.markdown; name = CLAUDE.md; path = ../CLAUDE.md; sourceTree = SOURCE_ROOT; };
 		B4FD0DFB2FA172C400272AE1 /* README.md */ = {isa = PBXFileReference; lastKnownFileType = net.daringfireball.markdown; name = README.md; path = ../README.md; sourceTree = SOURCE_ROOT; };
 		B4FD0DFC2FA172C400272AE1 /* log.md */ = {isa = PBXFileReference; lastKnownFileType = net.daringfireball.markdown; name = log.md; path = ../log.md; sourceTree = SOURCE_ROOT; };
-		B4FD0DFD2FA172C400272AE1 /* specialist-dispatch.md */ = {isa = PBXFileReference; lastKnownFileType = net.daringfireball.markdown; name = "specialist-dispatch.md"; path = "../specialist-dispatch.md"; sourceTree = SOURCE_ROOT; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedBuildFileExceptionSet section */
@@ -84,7 +83,6 @@
 				B4FD0DFA2FA172C400272AE1 /* CLAUDE.md */,
 				B4FD0DFB2FA172C400272AE1 /* README.md */,
 				B4FD0DFC2FA172C400272AE1 /* log.md */,
-				B4FD0DFD2FA172C400272AE1 /* specialist-dispatch.md */,
 			);
 			name = Documentation;
 			sourceTree = "<group>";
