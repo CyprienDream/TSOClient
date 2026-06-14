@@ -44,7 +44,7 @@ enum ExplorerDurationRegistry {
 
     static func estimate(task code: TaskCode,
                          subTypeId: Int,
-                         skills: [SpecialistsStore.SpecialistSkill]) -> TimeInterval? {
+                         skills: [SpecialistSkill]) -> TimeInterval? {
         guard let base = baseDurations[code], base > 0 else { return nil }
         guard let bonus = timeBonus[subTypeId], bonus > 0 else { return nil }
 

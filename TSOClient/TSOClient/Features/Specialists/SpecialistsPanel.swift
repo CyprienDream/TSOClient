@@ -2,24 +2,22 @@ import SwiftUI
 
 struct SpecialistsPanel: View {
     var store: SpecialistsStore
-    var onDispatch: (Int, Int, TaskCode, Int) -> Void  // uid1, uid2, taskCode, targetGrid
+    var coordinator: SpecialistDispatchCoordinator
 
     @State private var filter: SpecialistKind? = nil   // nil = All
-    @State private var selectedTasks: [String: TaskCode] = [:]
-    @State private var selectedGrids: [String: Int] = [:]
-    @State private var bulkGeologistTask: GeologistTask = .findStone
-    @State private var bulkExplorerTask: ExplorerTask = .treasureShort
 
     private let filters: [SpecialistKind?] = [nil, .geologist, .explorer, .general]
 
-    var filtered: [SpecialistsStore.SpecialistItem] {
+    var filtered: [SpecialistItem] {
         let base = filter.map { kind in store.items.filter { $0.specialistType == kind } } ?? store.items
+        let formatter = store.formatter
         return base.sorted { lhs, rhs in
-            lhs.displayPrimary.localizedCaseInsensitiveCompare(rhs.displayPrimary) == .orderedAscending
+            formatter.displayPrimary(for: lhs)
+                .localizedCaseInsensitiveCompare(formatter.displayPrimary(for: rhs)) == .orderedAscending
         }
     }
 
-    private var idleInView: [SpecialistsStore.SpecialistItem] {
+    private var idleInView: [SpecialistItem] {
         filtered.filter { $0.isIdle && $0.specialistType != .general && $0.specialistType != .unknown }
     }
 
@@ -43,19 +41,20 @@ struct SpecialistsPanel: View {
                 List(filtered) { spec in
                     SpecialistRow(
                         spec: spec,
+                        formatter: store.formatter,
                         playerLevel: store.playerLevel,
                         taskStartedAt: store.taskStartedAt[spec.id],
                         learnedDurations: store.learnedDurations,
                         taskCode: Binding(
-                            get: { selectedTasks[spec.id] ?? spec.specialistType.defaultTaskCode },
-                            set: { selectedTasks[spec.id] = $0 }
+                            get: { coordinator.resolvedTaskCode(for: spec) },
+                            set: { coordinator.selectedTasks[spec.id] = $0 }
                         ),
                         targetGrid: Binding(
-                            get: { selectedGrids[spec.id] ?? 0 },
-                            set: { selectedGrids[spec.id] = $0 }
+                            get: { coordinator.resolvedTargetGrid(for: spec) },
+                            set: { coordinator.selectedGrids[spec.id] = $0 }
                         ),
                         onDispatch: { tc, grid in
-                            onDispatch(spec.uid1, spec.uid2, tc, grid)
+                            coordinator.dispatchOne(spec: spec, taskCode: tc, targetGrid: grid)
                         }
                     )
                 }
@@ -92,8 +91,6 @@ struct SpecialistsPanel: View {
         .padding(.vertical, 6)
     }
 
-    // Fires the currently-selected per-row task for every idle Explorer/Geologist
-    // in the active filter. Skipped: Generals (need a grid), Unknown (no task set).
     private var bulkBar: some View {
         HStack {
             Text("\(idleInView.count) idle in view")
@@ -101,7 +98,7 @@ struct SpecialistsPanel: View {
                 .foregroundStyle(.secondary)
             Spacer()
             Button("Dispatch all idle") {
-                bulkDispatch()
+                coordinator.bulkDispatch(idleSpecialists: idleInView)
             }
             .buttonStyle(.borderedProminent)
             .controlSize(.small)
@@ -124,59 +121,43 @@ struct SpecialistsPanel: View {
                     HStack {
                         Text("All Geologists:")
                             .font(.caption).foregroundStyle(.secondary)
-                        Picker("", selection: $bulkGeologistTask) {
+                        Picker("", selection: Binding(
+                            get: { coordinator.bulkGeologistTask },
+                            set: { new in
+                                coordinator.bulkGeologistTask = new
+                                coordinator.applyBulkTask(new.taskCode, to: .geologist)
+                            }
+                        )) {
                             ForEach(GeologistTask.allCases) { t in
                                 Text(t.label(forPlayerLevel: store.playerLevel)).tag(t)
                             }
                         }
                         .labelsHidden()
                         .frame(maxWidth: .infinity)
-                        .onChange(of: bulkGeologistTask) { _, new in
-                            applyBulkTask(new.taskCode, to: .geologist)
-                        }
                     }
                 }
                 if showExp {
                     HStack {
                         Text("All Explorers:")
                             .font(.caption).foregroundStyle(.secondary)
-                        Picker("", selection: $bulkExplorerTask) {
+                        Picker("", selection: Binding(
+                            get: { coordinator.bulkExplorerTask },
+                            set: { new in
+                                coordinator.bulkExplorerTask = new
+                                coordinator.applyBulkTask(new.taskCode, to: .explorer)
+                            }
+                        )) {
                             ForEach(ExplorerTask.allCases) { t in
                                 Text(t.label).tag(t)
                             }
                         }
                         .labelsHidden()
                         .frame(maxWidth: .infinity)
-                        .onChange(of: bulkExplorerTask) { _, new in
-                            applyBulkTask(new.taskCode, to: .explorer)
-                        }
                     }
                 }
             }
             .padding(.horizontal, 10)
             .padding(.vertical, 6)
-        }
-    }
-
-    private func applyBulkTask(_ code: TaskCode, to kind: SpecialistKind) {
-        for spec in store.items where spec.specialistType == kind {
-            selectedTasks[spec.id] = code
-        }
-    }
-
-    private func bulkDispatch() {
-        let snapshot = idleInView
-        let plan: [(SpecialistsStore.SpecialistItem, TaskCode, Int)] = snapshot.compactMap { spec in
-            let tc = selectedTasks[spec.id] ?? spec.specialistType.defaultTaskCode
-            guard tc.isAvailable(for: spec, playerLevel: store.playerLevel) else { return nil }
-            let grid = selectedGrids[spec.id] ?? 0
-            return (spec, tc, grid)
-        }
-        print("[Bulk] firing \(plan.count) of \(snapshot.count) idle (skipped: \(snapshot.count - plan.count) gated)")
-        BulkDispatcher.run(items: plan) { i, item in
-            let (spec, tc, grid) = item
-            print("[Bulk] \(i + 1)/\(plan.count) uid=\(spec.uid1):\(spec.uid2) at=\(tc.actionType) st=\(tc.subTaskID)")
-            onDispatch(spec.uid1, spec.uid2, tc, grid)
         }
     }
 }

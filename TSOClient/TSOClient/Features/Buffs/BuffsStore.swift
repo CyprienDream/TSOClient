@@ -13,6 +13,12 @@ final class BuffsStore {
     private(set) var totalAmountByName: [String: Int] = [:]
     private(set) var cachedUniqueTypes: [BuffItem] = []
 
+    private let naming: NamingRegistry
+
+    init(naming: NamingRegistry = .default) {
+        self.naming = naming
+    }
+
     struct BuffItem: Identifiable {
         var id: String { "\(uid1):\(uid2)" }
         let uid1: Int
@@ -21,20 +27,10 @@ final class BuffsStore {
         let resourceName: String    // e.g. "Recruit" (empty string when not applicable)
         let amount: Int
         let insertedAt: Int         // Unix timestamp
-        let displayName: String     // computed once at apply (was per-render char loop)
+        let displayName: String     // resolved via NamingRegistry at apply
 
         // Just the name — amount is shown separately in the panel's inventory line.
         var displayLabel: String { displayName }
-
-        static let knownNames: [String: String] = [
-            "ProductivityBuffLvl300": "Aunt Irma's Feast",
-            "ProductivityBuffLvl3":   "Aunt Irma's Basket",
-            "ProductivityBuffLvl10":  "Stadium Snacks",
-        ]
-
-        static func computeDisplayName(_ buffName: String) -> String {
-            knownNames[buffName] ?? buffName.camelCaseToWords
-        }
     }
 
     // O(1) snapshot of the cached unique-type list. Sorted by displayName.
@@ -53,7 +49,7 @@ final class BuffsStore {
                 resourceName: $0.resourceName,
                 amount:       $0.amount,
                 insertedAt:   $0.insertedAt,
-                displayName:  BuffItem.computeDisplayName($0.buffName)
+                displayName:  naming.buffName(raw: $0.buffName)
             )
         }
         var byName: [String: BuffItem] = [:]

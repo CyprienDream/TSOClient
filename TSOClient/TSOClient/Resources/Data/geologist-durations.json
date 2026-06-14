@@ -83,13 +83,14 @@
     "3":  "TwoMarbleInOne",
     "4":  "QualityCopperMineshafts",
     "5":  "NaturalStoneVein",
+    "6":  "NaturalMarbleVein",
     "8":  "TwoIronInOne",
     "10": "TendentiousGeologist",
     "14": "NaturalGoldVein",
     "19": "NaturalBornDigger",
-    "_pool_6_13_17": ["NaturalMarbleVein", "IronMiningSurplus", "OreCollector"],
+    "_pool_13_17": ["IronMiningSurplus", "OreCollector"],
     "_unresolved": [
-      "NaturalMarbleVein", "IronMiningSurplus", "OreCollector",
+      "IronMiningSurplus", "OreCollector",
       "CopperMiningSurplus", "QualityCoalMineshafts", "GoldMiningSurplus",
       "HiddenCoalStash", "TwoCoalInOne", "QualityGoldMineshafts", "LuckyFind", "NaturesGift"
     ]

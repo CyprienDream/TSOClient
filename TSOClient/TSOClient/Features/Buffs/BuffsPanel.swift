@@ -3,42 +3,12 @@ import SwiftUI
 struct BuffsPanel: View {
     var buildingsStore: BuildingsStore
     var buffsStore: BuffsStore
-    // buffUid1, buffUid2, targetGrid
-    var onDispatch: (Int, Int, Int) -> Void
-
-    // Selected buff name per category (keyed by category displayName).
-    @State private var selectedBuff: [String: String] = [:]
-    // Master picker selection; when changed, overrides every category's selection.
-    @State private var masterBuff: String = ""
-
-    private var groups: [(category: BuildingCategory, buildings: [BuildingsStore.BuildingItem])] {
-        BuildingCategoryRegistry.categories
-            .compactMap { category -> (category: BuildingCategory, buildings: [BuildingsStore.BuildingItem])? in
-                let buildings = buildingsStore.buildings(matchingSkinBases: category.skinBases)
-                return buildings.isEmpty ? nil : (category, buildings)
-            }
-            .sorted {
-                $0.category.displayName.localizedCaseInsensitiveCompare($1.category.displayName) == .orderedAscending
-            }
-    }
-
-    // Building-specific buffs: productivity buffs for individual buildings,
-    // plus RemoveBuff and a seasonal variant. Town-hall area buffs, barracks,
-    // adventure buffs, etc. are excluded.
-    private var buildingBuffs: [BuffsStore.BuffItem] {
-        buffsStore.uniqueTypes.filter { isBuildingBuff($0.buffName) }
-    }
-
-    private func isBuildingBuff(_ name: String) -> Bool {
-        name.hasPrefix("ProductivityBuff") ||
-        name == "RemoveBuff" ||
-        name == "HalloweenEvent_Horror"
-    }
+    var coordinator: BuffDispatchCoordinator
 
     var body: some View {
         // Compute once per body invocation so each row reads from the same snapshot.
-        let snapshot = groups
-        let buffs = buildingBuffs
+        let snapshot = coordinator.groups
+        let buffs = coordinator.buildingBuffs
         let buffsVersion = buffsStore.version
         return VStack(alignment: .leading, spacing: 0) {
             header
@@ -63,7 +33,7 @@ struct BuffsPanel: View {
                 ScrollView {
                     LazyVStack(alignment: .leading, spacing: 0) {
                         ForEach(snapshot, id: \.category.id) { group in
-                            let sel = selectedBuff[group.category.id] ?? ""
+                            let sel = coordinator.selectedBuff[group.category.id] ?? ""
                             BuildingGroupRow(
                                 categoryDisplayName: group.category.displayName,
                                 buildingsCount: group.buildings.count,
@@ -72,10 +42,10 @@ struct BuffsPanel: View {
                                 buffsVersion: buffsVersion,
                                 selectedBuff: sel,
                                 onSelect: { newName in
-                                    selectedBuff[group.category.id] = newName
+                                    coordinator.selectedBuff[group.category.id] = newName
                                 },
                                 onBuffAll: {
-                                    buffAll(group: group.buildings, buffName: sel)
+                                    coordinator.buffAll(group: group.buildings, buffName: sel)
                                 }
                             )
                             .equatable()
@@ -109,10 +79,11 @@ struct BuffsPanel: View {
         buffs: [BuffsStore.BuffItem],
         snapshot: [(category: BuildingCategory, buildings: [BuildingsStore.BuildingItem])]
     ) -> some View {
-        let label = masterBuff.isEmpty
+        let label = coordinator.masterBuff.isEmpty
             ? "— select buff —"
-            : (buffs.first { $0.buffName == masterBuff }?.displayLabel ?? masterBuff)
-        let canBuffAll = !masterBuff.isEmpty && buffsStore.totalAmount(for: masterBuff) > 0
+            : (buffs.first { $0.buffName == coordinator.masterBuff }?.displayLabel ?? coordinator.masterBuff)
+        let canBuffAll = !coordinator.masterBuff.isEmpty
+            && buffsStore.totalAmount(for: coordinator.masterBuff) > 0
         let totalBuildings = snapshot.reduce(0) { $0 + $1.buildings.count }
         return VStack(alignment: .leading, spacing: 4) {
             HStack {
@@ -127,14 +98,11 @@ struct BuffsPanel: View {
             HStack(spacing: 6) {
                 Menu {
                     Button("— select buff —") {
-                        masterBuff = ""
+                        coordinator.selectMasterBuff("", across: snapshot)
                     }
                     ForEach(buffs) { buff in
                         Button(buff.displayLabel) {
-                            masterBuff = buff.buffName
-                            for group in snapshot {
-                                selectedBuff[group.category.id] = buff.buffName
-                            }
+                            coordinator.selectMasterBuff(buff.buffName, across: snapshot)
                         }
                     }
                 } label: {
@@ -142,7 +110,7 @@ struct BuffsPanel: View {
                 }
 
                 Button("Buff all") {
-                    buffAllGroups(snapshot: snapshot, buffName: masterBuff)
+                    coordinator.buffAllGroups(snapshot: snapshot, buffName: coordinator.masterBuff)
                 }
                 .buttonStyle(.borderedProminent)
                 .controlSize(.small)
@@ -152,29 +120,10 @@ struct BuffsPanel: View {
         .padding(.horizontal, 12)
         .padding(.vertical, 8)
     }
-
-    // Dispatch the same buff stack uid to every building in the group.
-    // The server decrements the stack amount on each call.
-    private func buffAll(group: [BuildingsStore.BuildingItem], buffName: String) {
-        guard let buff = buffsStore.item(for: buffName) else { return }
-        BulkDispatcher.run(items: group) { i, building in
-            print("[BuffAll] \(i + 1)/\(group.count) grid=\(building.gridIndex) buff=\(buff.uid1):\(buff.uid2)")
-            onDispatch(buff.uid1, buff.uid2, building.gridIndex)
-        }
-    }
-
-    // Flatten every visible group's buildings and dispatch the master buff to each.
-    private func buffAllGroups(
-        snapshot: [(category: BuildingCategory, buildings: [BuildingsStore.BuildingItem])],
-        buffName: String
-    ) {
-        let all = snapshot.flatMap { $0.buildings }
-        buffAll(group: all, buffName: buffName)
-    }
 }
 
 // Equatable so SwiftUI skips re-rendering rows whose visible inputs didn't change.
-// Closures and the BuffsStore reference are intentionally ignored in `==`.
+// Closures and store references are intentionally ignored in `==`.
 private struct BuildingGroupRow: View, Equatable {
     let categoryDisplayName: String
     let buildingsCount: Int
