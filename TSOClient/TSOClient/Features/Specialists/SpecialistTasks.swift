@@ -103,9 +103,9 @@ enum ExplorerTask: CaseIterable, Identifiable {
         }
     }
 
-    func isAvailable(skills: [Int]) -> Bool {
+    func isAvailable(skillIDs: [Int]) -> Bool {
         guard let req = requiredSkillID else { return true }
-        return skills.contains(req)
+        return skillIDs.contains(req)
     }
 }
 

@@ -360,10 +360,14 @@
                     || taskTypeHint
                     || classifier.classifySpec(subTypeId, sp.garrisonBuildingGridPos | 0, sp.name_string);
 
-                // Skills: ArrayCollection of SkillVO{id, level}. Emit IDs where level > 0.
+                // Skills: ArrayCollection of SkillVO{id, level}. Emit {id,level} pairs
+                // where level > 0. Level is needed for ExplorerDurationRegistry estimates;
+                // older callers that only need IDs read .id off each entry.
                 var skills = [];
                 unwrapCollection(sp.skills).forEach(function(sk) {
-                    if (sk && typeof sk.id === 'number' && (sk.level | 0) > 0) skills.push(sk.id);
+                    if (sk && typeof sk.id === 'number' && (sk.level | 0) > 0) {
+                        skills.push({ id: sk.id, level: sk.level | 0 });
+                    }
                 });
 
                 var collectedTime = (taskObj && typeof taskObj.collectedTime === 'number')

@@ -9,7 +9,8 @@ final class SpecialistsStore {
     var serverTimeCapturedAt: Date? = nil
 
     // Wall-clock time of actual task start, backtracked from ct on every zone load.
-    // ct = elapsed ms since task start → taskStartedAt = now - ct/1000.
+    // ct is in base-time-equivalent milliseconds (advances at bonus/100 × real time, so a
+    // 3× subtype's ct ticks 3× wall clock). Real elapsed seconds = ct/1000 × 100/bonus.
     var taskStartedAt: [String: Date] = [:]
 
     // Self-learning duration table. Populated when a specialist transitions busy→idle:
@@ -29,6 +30,11 @@ final class SpecialistsStore {
     }
     private var busySnapshots: [String: BusySnapshot] = [:]
 
+    struct SpecialistSkill: Decodable, Hashable {
+        let id: Int
+        let level: Int
+    }
+
     struct SpecialistItem: Identifiable {
         let id: String          // "uid1:uid2"
         let uid1: Int
@@ -38,17 +44,31 @@ final class SpecialistsStore {
         let subTypeName: String?        // CamelCase canonical name, e.g. "PirateExplorer"
         let name: String                // player's custom name (may be empty)
         let isIdle: Bool
-        let skills: [Int]
+        let skills: [SpecialistSkill]
         let collectedTime: Int?
         let bonusTime: Int?
         let taskEndTime: Double?
         let taskActionType: Int?        // nil when idle
         let taskSubTaskId: Int?         // nil when idle
 
+        // Manual overrides for subtype labels that don't read well as a plain
+        // CamelCase split — e.g. the "Soccer2019" promo explorer is shown
+        // in-game as "Adventurous".
+        static let subtypeDisplayOverrides: [String: String] = [
+            "Explorer":                     "Basic Explorer",
+            "General":                      "Basic General",
+            "Soccer2019Explorer":           "Adventurous Explorer",
+            "FastLuckyExplorer":            "Lucky Explorer",
+            "EasterExplorer":               "Experienced Explorer",
+            "EmphaticExplorer":             "Emphatic Explorer",
+            "MasterExplorer":               "Savage Scout",
+            "SmugglerGeneral":              "Smuggler",
+            "MasterOfMartialArtsGeneral":   "Master of Martial Arts",
+        ]
+
         var displaySubtype: String {
             if let raw = subTypeName, !raw.isEmpty {
-                if raw == "Explorer" { return "Basic Explorer" }
-                if raw == "General"  { return "Basic General" }
+                if let override = Self.subtypeDisplayOverrides[raw] { return override }
                 return raw.camelCaseToWords
             }
             if subTypeId > 0 { return "\(specialistType.rawValue) #\(subTypeId)" }
@@ -76,6 +96,23 @@ final class SpecialistsStore {
         }
     }
 
+    private static func logPrefix(for kind: SpecialistKind) -> String? {
+        switch kind {
+        case .explorer:  return "ExplorerDuration"
+        case .geologist: return "GeologistDuration"
+        case .general, .unknown: return nil
+        }
+    }
+
+    private static func displayName(for item: InboundMessage.SpecialistsPayload.Item) -> String {
+        let raw = item.subTypeName ?? ""
+        let subtype: String
+        if let override = SpecialistItem.subtypeDisplayOverrides[raw] { subtype = override }
+        else if !raw.isEmpty { subtype = raw.camelCaseToWords }
+        else { subtype = "\(item.specialistType.rawValue) #\(item.subTypeId)" }
+        return item.name.isEmpty ? subtype : "\(item.name) (\(subtype))"
+    }
+
     func apply(_ payload: InboundMessage.SpecialistsPayload) {
         let now = Date()
         let nextUids = Set(payload.items.map { $0.uid })
@@ -87,9 +124,14 @@ final class SpecialistsStore {
 
         for item in payload.items {
             if !item.isIdle {
-                // Backtrack to actual task start using ct (elapsed ms).
+                // Backtrack to actual task start. ct is base-time-equivalent ms; real
+                // elapsed seconds = ct/1000 × 100/bonus. Non-explorer subtypes have no
+                // bonus in the registry — default to 100 (no scaling) which keeps the
+                // current geologist/general behavior.
+                let bonus = ExplorerDurationRegistry.timeBonus[item.subTypeId] ?? 100
                 if let ct = item.collectedTime {
-                    taskStartedAt[item.uid] = now.addingTimeInterval(-Double(ct) / 1000.0)
+                    let realElapsedSec = Double(ct) / 1000.0 * 100.0 / Double(bonus)
+                    taskStartedAt[item.uid] = now.addingTimeInterval(-realElapsedSec)
                 } else if taskStartedAt[item.uid] == nil {
                     taskStartedAt[item.uid] = now
                 }
@@ -104,18 +146,64 @@ final class SpecialistsStore {
                         lastCt: ct,
                         lastCtAt: now
                     )
+                    // Per-specialist busy log so the user can cross-reference predictions
+                    // (or just skill IDs for kinds we don't have a registry for yet)
+                    // against the in-game UI without waiting for task completion.
+                    if let prefix = Self.logPrefix(for: item.specialistType) {
+                        let code = TaskCode(actionType: at, subTaskID: st)
+                        let skillStr = item.skills.map { "\($0.id)/\($0.level)" }.joined(separator: ",")
+                        let realElapsedS = Double(ct) / 1000.0 * 100.0 / Double(bonus)
+                        if let predicted = ExplorerDurationRegistry.estimate(
+                            task: code, subTypeId: item.subTypeId, skills: item.skills) {
+                            let remainingS = max(0, predicted - realElapsedS)
+                            print("[\(prefix)] busy \"\(Self.displayName(for: item))\" uid=\(item.uid) type=\(item.subTypeId) " +
+                                  "task=\(at),\(st) skills=[\(skillStr)] " +
+                                  "predicted=\(Int(predicted))s elapsed=\(Int(realElapsedS))s " +
+                                  "remaining=\(Int(remainingS))s")
+                        } else {
+                            print("[\(prefix)] busy \"\(Self.displayName(for: item))\" uid=\(item.uid) type=\(item.subTypeId) " +
+                                  "task=\(at),\(st) skills=[\(skillStr)] elapsed=\(Int(realElapsedS))s")
+                        }
+                    }
                 }
             } else {
-                taskStartedAt.removeValue(forKey: item.uid)
-                // Specialist just completed their task — record approximate total duration.
+                // Specialist just completed their task — record approximate total
+                // duration BEFORE dropping the start anchor. Wall-clock from
+                // taskStartedAt is authoritative (already converted from base-equiv
+                // ct). Fallback for the rare no-anchor case uses snap timing.
                 if let snap = busySnapshots[item.uid] {
-                    let extraMs = Int(now.timeIntervalSince(snap.lastCtAt) * 1000)
-                    let approxTotal = snap.lastCt + extraMs
+                    let totalRealMs: Int = {
+                        if let startedAt = taskStartedAt[item.uid] {
+                            return Int(now.timeIntervalSince(startedAt) * 1000)
+                        }
+                        return snap.lastCt + Int(now.timeIntervalSince(snap.lastCtAt) * 1000)
+                    }()
                     let key = "\(snap.subTypeId):\(snap.actionType):\(snap.subTaskId)"
-                    // Keep the most recent observation (last completion is most accurate).
-                    learnedDurations[key] = approxTotal
+                    learnedDurations[key] = totalRealMs
+
+                    // Surface table errors: predicted vs observed should agree closely.
+                    // >5% divergence usually means a wrong timeBonus, a missing skill
+                    // mapping, or a missing base duration entry.
+                    let code = TaskCode(actionType: snap.actionType, subTaskID: snap.subTaskId)
+                    if let predicted = ExplorerDurationRegistry.estimate(
+                        task: code, subTypeId: snap.subTypeId, skills: item.skills) {
+                        let observedSec = Double(totalRealMs) / 1000.0
+                        let delta = abs(predicted - observedSec) / observedSec
+                        if delta > 0.05 {
+                            print("[ExplorerDuration] divergence \(Int(delta*100))% " +
+                                  "key=\(key) skills=\(item.skills.map { "\($0.id)/\($0.level)" }.joined(separator: ",")) " +
+                                  "predicted=\(Int(predicted))s observed=\(Int(observedSec))s")
+                        }
+                    }
                 }
+                taskStartedAt.removeValue(forKey: item.uid)
                 busySnapshots.removeValue(forKey: item.uid)
+                // Idle log — lets the user cross-reference skill IDs with the in-game
+                // skill book (only viewable while the specialist is idle).
+                if let prefix = Self.logPrefix(for: item.specialistType) {
+                    let skillStr = item.skills.map { "\($0.id)/\($0.level)" }.joined(separator: ",")
+                    print("[\(prefix)] idle \"\(Self.displayName(for: item))\" uid=\(item.uid) type=\(item.subTypeId) skills=[\(skillStr)]")
+                }
             }
         }
         // Drop snapshots for specialists that left the list entirely.
@@ -153,7 +241,7 @@ final class SpecialistsStore {
     func markDispatched(uid: String, actionType: Int, subTaskId: Int) {
         guard let idx = items.firstIndex(where: { $0.id == uid }) else { return }
         let old = items[idx]
-        items[idx] = SpecialistItem(
+        items[idx] = SpecialistItem( 
             id:             old.id,
             uid1:           old.uid1,
             uid2:           old.uid2,

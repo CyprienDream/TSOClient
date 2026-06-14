@@ -12,10 +12,14 @@ struct BuffsPanel: View {
     @State private var masterBuff: String = ""
 
     private var groups: [(category: BuildingCategory, buildings: [BuildingsStore.BuildingItem])] {
-        BuildingCategoryRegistry.categories.compactMap { category in
-            let buildings = buildingsStore.buildings(matchingSkinBases: category.skinBases)
-            return buildings.isEmpty ? nil : (category, buildings)
-        }
+        BuildingCategoryRegistry.categories
+            .compactMap { category -> (category: BuildingCategory, buildings: [BuildingsStore.BuildingItem])? in
+                let buildings = buildingsStore.buildings(matchingSkinBases: category.skinBases)
+                return buildings.isEmpty ? nil : (category, buildings)
+            }
+            .sorted {
+                $0.category.displayName.localizedCaseInsensitiveCompare($1.category.displayName) == .orderedAscending
+            }
     }
 
     // Building-specific buffs: productivity buffs for individual buildings,

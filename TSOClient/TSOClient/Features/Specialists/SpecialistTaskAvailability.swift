@@ -24,7 +24,7 @@ extension TaskCode {
         }
         if spec.specialistType == .explorer,
            let task = ExplorerTask.allCases.first(where: { $0.taskCode == self }) {
-            return task.isAvailable(skills: spec.skills)
+            return task.isAvailable(skillIDs: spec.skills.map(\.id))
         }
         return true
     }

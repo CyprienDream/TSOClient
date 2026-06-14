@@ -65,7 +65,7 @@ enum InboundMessage {
             let subTypeName: String?        // canonical name like "PirateExplorer" (nil if unmapped)
             let name: String
             let isIdle: Bool
-            let skills: [Int]               // skill IDs with level > 0
+            let skills: [SpecialistsStore.SpecialistSkill]   // id + level, level>0 only
             let collectedTime: Int?         // elapsed ms since task start (counts up)
             let bonusTime: Int?
             let taskEndTime: Double?
