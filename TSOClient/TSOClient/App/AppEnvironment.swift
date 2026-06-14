@@ -1,21 +1,55 @@
 import Foundation
 
-// Bag of the app's long-lived stores plus the Swift→JS sender. Created once
-// in ContentView and threaded through WebView / BridgeRouter so feature views
-// don't accumulate per-store init parameters. Field types are reference types
-// (@Observable classes), so passing by value preserves identity.
+// Bag of the app's long-lived stores, bridge dispatchers, and view-model
+// coordinators. Created once in ContentView and threaded through WebView so
+// feature views don't accumulate per-store init parameters. Field types are
+// reference types (@Observable classes), so passing by value preserves identity.
 struct AppEnvironment {
     let collectibles: CollectiblesStore
     let specialists: SpecialistsStore
     let buildings: BuildingsStore
     let buffs: BuffsStore
-    let sender: BridgeSender
+    let sender: BridgeSender              // also conforms to OutboundDispatching
+    let inbound: InboundDispatcher
+    let specialistDispatch: SpecialistDispatchCoordinator
+    let buffDispatch: BuffDispatchCoordinator
+    let logger: Logger
 
-    init() {
+    init(logger: Logger = ConsoleLogger(),
+         naming: NamingRegistry = .default,
+         buffCategoryClassifier: BuffCategoryClassifier = .default) {
+        self.logger = logger
         self.collectibles = CollectiblesStore()
-        self.specialists = SpecialistsStore()
+        self.specialists = SpecialistsStore(
+            formatter: SpecialistDisplayFormatter(naming: naming),
+            learner: SpecialistDurationLearner(logger: logger)
+        )
         self.buildings = BuildingsStore()
-        self.buffs = BuffsStore()
-        self.sender = BridgeSender()
+        self.buffs = BuffsStore(naming: naming)
+        let sender = BridgeSender(logger: logger)
+        self.sender = sender
+
+        let inbound = InboundDispatcher(logger: logger)
+        inbound.register(CollectiblesHandler(store: collectibles))
+        inbound.register(SpecialistsHandler(store: specialists, logger: logger))
+        inbound.register(BuildingsHandler(store: buildings, logger: logger))
+        inbound.register(BuffsHandler(store: buffs, logger: logger))
+        inbound.register(GameStateHandler(
+            collectibles: collectibles,
+            specialists: specialists,
+            buildings: buildings,
+            buffs: buffs,
+            logger: logger
+        ))
+        self.inbound = inbound
+
+        self.specialistDispatch = SpecialistDispatchCoordinator(
+            store: specialists, dispatcher: sender, logger: logger)
+        self.buffDispatch = BuffDispatchCoordinator(
+            buffsStore: buffs,
+            buildingsStore: buildings,
+            dispatcher: sender,
+            classifier: buffCategoryClassifier,
+            logger: logger)
     }
 }

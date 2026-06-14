@@ -17,7 +17,7 @@ extension TaskCode {
     // Is this task allowed for a given specialist at the current player level?
     // For unknown task codes (e.g. General star-menu) the answer is yes — the
     // gating only applies to geologist/explorer subtasks.
-    func isAvailable(for spec: SpecialistsStore.SpecialistItem, playerLevel: Int?) -> Bool {
+    func isAvailable(for spec: SpecialistItem, playerLevel: Int?) -> Bool {
         if spec.specialistType == .geologist,
            let task = GeologistTask(rawValue: subTaskID), actionType == 0 {
             return task.isAvailable(playerLevel: playerLevel)

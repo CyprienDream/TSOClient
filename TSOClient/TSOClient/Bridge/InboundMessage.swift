@@ -1,12 +1,9 @@
 import Foundation
 
+// Namespace for the Decodable payload structs each inbound message handler
+// understands. The runtime routing lives in `InboundDispatcher`; this file
+// is data only.
 enum InboundMessage {
-
-    case collectibles(CollectiblesPayload)
-    case gameState(GameStatePayload)
-    case specialists(SpecialistsPayload)
-    case buildings(BuildingsPayload)
-    case buffs(BuffsPayload)
 
     struct CollectiblesPayload: Decodable {
         let mapWidth: Int
@@ -65,7 +62,7 @@ enum InboundMessage {
             let subTypeName: String?        // canonical name like "PirateExplorer" (nil if unmapped)
             let name: String
             let isIdle: Bool
-            let skills: [SpecialistsStore.SpecialistSkill]   // id + level, level>0 only
+            let skills: [SpecialistSkill]   // id + level, level>0 only
             let collectedTime: Int?         // elapsed ms since task start (counts up)
             let bonusTime: Int?
             let taskEndTime: Double?
@@ -79,31 +76,6 @@ enum InboundMessage {
                 case taskActionType
                 case taskSubTaskId = "taskSubTaskID"
             }
-        }
-    }
-
-    static func decode(name: String, body: Any) -> InboundMessage? {
-        guard name == "tso",
-              let dict = body as? [String: Any],
-              let type = dict["type"] as? String,
-              let payload = dict["payload"],
-              JSONSerialization.isValidJSONObject(payload),
-              let data = try? JSONSerialization.data(withJSONObject: payload)
-        else { return nil }
-
-        let decoder = JSONDecoder()
-        do {
-            switch type {
-            case "COLLECTIBLES": return .collectibles(try decoder.decode(CollectiblesPayload.self, from: data))
-            case "GAME_STATE":   return .gameState(try decoder.decode(GameStatePayload.self, from: data))
-            case "SPECIALISTS":  return .specialists(try decoder.decode(SpecialistsPayload.self, from: data))
-            case "BUILDINGS":    return .buildings(try decoder.decode(BuildingsPayload.self, from: data))
-            case "BUFFS":        return .buffs(try decoder.decode(BuffsPayload.self, from: data))
-            default:             return nil
-            }
-        } catch {
-            print("[InboundMessage] decode error for '\(type)': \(error)")
-            return nil
         }
     }
 }

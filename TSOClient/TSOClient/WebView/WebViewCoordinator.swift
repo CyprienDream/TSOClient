@@ -2,11 +2,13 @@ import WebKit
 
 final class WebViewCoordinator: NSObject, WKUIDelegate, WKNavigationDelegate, WKScriptMessageHandler {
 
-    private let router: BridgeRouter
+    private let inbound: InboundDispatcher
+    private let logger: Logger
     weak var webView: WKWebView?
 
     init(env: AppEnvironment) {
-        self.router = BridgeRouter(env: env)
+        self.inbound = env.inbound
+        self.logger = env.logger
     }
 
     // Open target="_blank" links inside the same view.
@@ -23,23 +25,17 @@ final class WebViewCoordinator: NSObject, WKUIDelegate, WKNavigationDelegate, WK
     func webView(_ webView: WKWebView,
                  didFailProvisionalNavigation _: WKNavigation!,
                  withError error: Error) {
-        print("[TSO] Navigation error: \(error.localizedDescription)")
+        logger.log("[TSO] Navigation error: \(error.localizedDescription)")
     }
 
     func userContentController(_ controller: WKUserContentController,
                                didReceive message: WKScriptMessage) {
         if message.name == "logger" {
-            print("[JS] \(message.body)")
+            logger.log("[JS] \(message.body)")
             return
         }
-
-        guard let msg = InboundMessage.decode(name: message.name, body: message.body) else {
-            print("[TSO] Unknown message from '\(message.name)': \(message.body)")
-            return
-        }
-
         DispatchQueue.main.async { [weak self] in
-            self?.router.route(msg)
+            self?.inbound.dispatch(name: message.name, body: message.body)
         }
     }
 }

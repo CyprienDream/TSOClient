@@ -2,21 +2,26 @@ import Observation
 import WebKit
 
 @Observable
-final class BridgeSender {
+final class BridgeSender: OutboundDispatching {
     weak var webView: WKWebView?
+    private let logger: Logger
 
-    func send(_ command: OutboundCommand) {
+    init(logger: Logger = ConsoleLogger()) {
+        self.logger = logger
+    }
+
+    func send(_ command: WireCommand) {
         guard let webView else {
-            print("[BridgeSender] webView is nil — message dropped")
+            logger.log("[BridgeSender] webView is nil — message dropped")
             return
         }
         guard let js = renderJSExpression(for: command) else {
-            print("[BridgeSender] failed to encode payload for \(command.type)")
+            logger.log("[BridgeSender] failed to encode payload for \(command.type)")
             return
         }
-        webView.evaluateJavaScript(js) { _, error in
+        webView.evaluateJavaScript(js) { [logger] _, error in
             if let error {
-                print("[BridgeSender] JS error: \(error)")
+                logger.log("[BridgeSender] JS error: \(error)")
             }
         }
     }

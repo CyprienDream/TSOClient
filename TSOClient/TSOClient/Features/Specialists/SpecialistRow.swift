@@ -2,7 +2,8 @@ import SwiftUI
 import Combine
 
 struct SpecialistRow: View {
-    let spec: SpecialistsStore.SpecialistItem
+    let spec: SpecialistItem
+    let formatter: SpecialistDisplayFormatter
     let playerLevel: Int?
     let taskStartedAt: Date?
     let learnedDurations: [String: Int]
@@ -18,10 +19,10 @@ struct SpecialistRow: View {
         VStack(alignment: .leading, spacing: 4) {
             HStack {
                 VStack(alignment: .leading, spacing: 2) {
-                    Text(spec.displayPrimary)
+                    Text(formatter.displayPrimary(for: spec))
                         .font(.subheadline).bold()
-                    if spec.hasDistinctSecondary {
-                        Text(spec.displaySubtype)
+                    if formatter.hasDistinctSecondary(for: spec) {
+                        Text(formatter.displaySubtype(for: spec))
                             .font(.caption).foregroundStyle(.secondary)
                     }
                 }

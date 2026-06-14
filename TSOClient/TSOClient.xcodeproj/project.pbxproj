@@ -10,12 +10,23 @@
 		B4FD0DF82FA172C400272AE1 /* WebKit.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = B4FD0DF72FA172C400272AE1 /* WebKit.framework */; };
 /* End PBXBuildFile section */
 
+/* Begin PBXContainerItemProxy section */
+		C00000000000000000000009 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = B4FD0DE02FA1722A00272AE1 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = B4FD0DE72FA1722A00272AE1;
+			remoteInfo = TSOClient;
+		};
+/* End PBXContainerItemProxy section */
+
 /* Begin PBXFileReference section */
 		B4FD0DE82FA1722A00272AE1 /* TSOClient.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = TSOClient.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		B4FD0DF72FA172C400272AE1 /* WebKit.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = WebKit.framework; path = System/Library/Frameworks/WebKit.framework; sourceTree = SDKROOT; };
 		B4FD0DFA2FA172C400272AE1 /* CLAUDE.md */ = {isa = PBXFileReference; lastKnownFileType = net.daringfireball.markdown; name = CLAUDE.md; path = ../CLAUDE.md; sourceTree = SOURCE_ROOT; };
 		B4FD0DFB2FA172C400272AE1 /* README.md */ = {isa = PBXFileReference; lastKnownFileType = net.daringfireball.markdown; name = README.md; path = ../README.md; sourceTree = SOURCE_ROOT; };
 		B4FD0DFC2FA172C400272AE1 /* log.md */ = {isa = PBXFileReference; lastKnownFileType = net.daringfireball.markdown; name = log.md; path = ../log.md; sourceTree = SOURCE_ROOT; };
+		C00000000000000000000003 /* TSOClientTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = TSOClientTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedBuildFileExceptionSet section */
@@ -37,6 +48,11 @@
 			path = TSOClient;
 			sourceTree = "<group>";
 		};
+		C00000000000000000000007 /* TSOClientTests */ = {
+			isa = PBXFileSystemSynchronizedRootGroup;
+			path = TSOClientTests;
+			sourceTree = "<group>";
+		};
 /* End PBXFileSystemSynchronizedRootGroup section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -55,6 +71,7 @@
 			isa = PBXGroup;
 			children = (
 				B4FD0DEA2FA1722A00272AE1 /* TSOClient */,
+				C00000000000000000000007 /* TSOClientTests */,
 				B4FD0DF92FA172C400272AE1 /* Documentation */,
 				B4FD0DF62FA172C400272AE1 /* Frameworks */,
 				B4FD0DE92FA1722A00272AE1 /* Products */,
@@ -65,6 +82,7 @@
 			isa = PBXGroup;
 			children = (
 				B4FD0DE82FA1722A00272AE1 /* TSOClient.app */,
+				C00000000000000000000003 /* TSOClientTests.xctest */,
 			);
 			name = Products;
 			sourceTree = "<group>";
@@ -112,6 +130,27 @@
 			productReference = B4FD0DE82FA1722A00272AE1 /* TSOClient.app */;
 			productType = "com.apple.product-type.application";
 		};
+		C00000000000000000000001 /* TSOClientTests */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = C00000000000000000000004 /* Build configuration list for PBXNativeTarget "TSOClientTests" */;
+			buildPhases = (
+				C00000000000000000000002 /* Sources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+				C00000000000000000000008 /* PBXTargetDependency */,
+			);
+			fileSystemSynchronizedGroups = (
+				C00000000000000000000007 /* TSOClientTests */,
+			);
+			name = TSOClientTests;
+			packageProductDependencies = (
+			);
+			productName = TSOClientTests;
+			productReference = C00000000000000000000003 /* TSOClientTests.xctest */;
+			productType = "com.apple.product-type.bundle.unit-test";
+		};
 /* End PBXNativeTarget section */
 
 /* Begin PBXProject section */
@@ -124,6 +163,10 @@
 				TargetAttributes = {
 					B4FD0DE72FA1722A00272AE1 = {
 						CreatedOnToolsVersion = 26.4.1;
+					};
+					C00000000000000000000001 = {
+						CreatedOnToolsVersion = 26.4.1;
+						TestTargetID = B4FD0DE72FA1722A00272AE1;
 					};
 				};
 			};
@@ -142,6 +185,7 @@
 			projectRoot = "";
 			targets = (
 				B4FD0DE72FA1722A00272AE1 /* TSOClient */,
+				C00000000000000000000001 /* TSOClientTests */,
 			);
 		};
 /* End PBXProject section */
@@ -164,7 +208,22 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
+		C00000000000000000000002 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 /* End PBXSourcesBuildPhase section */
+
+/* Begin PBXTargetDependency section */
+		C00000000000000000000008 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = B4FD0DE72FA1722A00272AE1 /* TSOClient */;
+			targetProxy = C00000000000000000000009 /* PBXContainerItemProxy */;
+		};
+/* End PBXTargetDependency section */
 
 /* Begin XCBuildConfiguration section */
 		B4FD0DF12FA1722D00272AE1 /* Debug */ = {
@@ -367,6 +426,54 @@
 			};
 			name = Release;
 		};
+		C00000000000000000000005 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				CODE_SIGN_STYLE = Automatic;
+				GENERATE_INFOPLIST_FILE = YES;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/../Frameworks",
+					"@loader_path/../Frameworks",
+				);
+				MACOSX_DEPLOYMENT_TARGET = 26.4;
+				PRODUCT_BUNDLE_IDENTIFIER = sleepyTown.TSOClientTests;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = macosx;
+				SWIFT_APPROACHABLE_CONCURRENCY = YES;
+				SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor;
+				SWIFT_EMIT_LOC_STRINGS = NO;
+				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
+				SWIFT_VERSION = 5.0;
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/TSOClient.app/Contents/MacOS/TSOClient";
+			};
+			name = Debug;
+		};
+		C00000000000000000000006 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				CODE_SIGN_STYLE = Automatic;
+				GENERATE_INFOPLIST_FILE = YES;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/../Frameworks",
+					"@loader_path/../Frameworks",
+				);
+				MACOSX_DEPLOYMENT_TARGET = 26.4;
+				PRODUCT_BUNDLE_IDENTIFIER = sleepyTown.TSOClientTests;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = macosx;
+				SWIFT_APPROACHABLE_CONCURRENCY = YES;
+				SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor;
+				SWIFT_EMIT_LOC_STRINGS = NO;
+				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
+				SWIFT_VERSION = 5.0;
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/TSOClient.app/Contents/MacOS/TSOClient";
+			};
+			name = Release;
+		};
 /* End XCBuildConfiguration section */
 
 /* Begin XCConfigurationList section */
@@ -384,6 +491,15 @@
 			buildConfigurations = (
 				B4FD0DF42FA1722D00272AE1 /* Debug */,
 				B4FD0DF52FA1722D00272AE1 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		C00000000000000000000004 /* Build configuration list for PBXNativeTarget "TSOClientTests" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				C00000000000000000000005 /* Debug */,
+				C00000000000000000000006 /* Release */,
 			);
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;

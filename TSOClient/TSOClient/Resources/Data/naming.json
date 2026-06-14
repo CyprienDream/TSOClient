@@ -1,0 +1,23 @@
+{
+  "specialistSubtypes": {
+    "Explorer":                     "Basic Explorer",
+    "General":                      "Basic General",
+    "Soccer2019Explorer":           "Adventurous Explorer",
+    "FastLuckyExplorer":            "Lucky Explorer",
+    "EasterExplorer":               "Experienced Explorer",
+    "EmphaticExplorer":             "Emphatic Explorer",
+    "MasterExplorer":               "Savage Scout",
+    "SmugglerGeneral":              "Smuggler",
+    "MasterOfMartialArtsGeneral":   "Master of Martial Arts"
+  },
+  "buffs": {
+    "ProductivityBuffLvl300": "Aunt Irma's Feast",
+    "ProductivityBuffLvl3":   "Aunt Irma's Basket",
+    "ProductivityBuffLvl10":  "Stadium Snacks"
+  },
+  "buildings": {
+    "WoodCutter":       "Pinewood Cutter",
+    "RealWoodCutter":   "Hardwood Cutter",
+    "ExoticWoodCutter": "Exotic Wood Cutter"
+  }
+}

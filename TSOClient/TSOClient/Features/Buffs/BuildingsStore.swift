@@ -16,17 +16,6 @@ final class BuildingsStore {
         let uid1: Int
         let uid2: Int
         let activeBuff: String? // buffName_string of first active buff, nil if unbuffed
-
-        var displayName: String {
-            if let known = BuildingItem.knownNames[skinBase] { return known }
-            return skinBase.camelCaseToWords
-        }
-
-        private static let knownNames: [String: String] = [
-            "WoodCutter":       "Pinewood Cutter",
-            "RealWoodCutter":   "Hardwood Cutter",
-            "ExoticWoodCutter": "Exotic Wood Cutter",
-        ]
     }
 
     // Buildings matching a skin filter, grouped by skinBase, sorted by name then grid.

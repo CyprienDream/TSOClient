@@ -1,0 +1,6 @@
+{
+  "buildingBuffs": {
+    "prefixes": ["ProductivityBuff"],
+    "exact":    ["RemoveBuff", "HalloweenEvent_Horror"]
+  }
+}

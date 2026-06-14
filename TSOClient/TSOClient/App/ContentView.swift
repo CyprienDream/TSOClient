@@ -23,24 +23,13 @@ struct ContentView: View {
 
                 switch activeTab {
                 case .specialists:
-                    SpecialistsPanel(store: env.specialists) { uid1, uid2, taskCode, targetGrid in
-                        env.specialists.markDispatched(uid: "\(uid1):\(uid2)", actionType: taskCode.actionType, subTaskId: taskCode.subTaskID)
-                        env.sender.send(DispatchSpecialistCommand(
-                            uid1: uid1, uid2: uid2,
-                            actionType: taskCode.actionType,
-                            subTaskID: taskCode.subTaskID,
-                            targetGrid: targetGrid))
-                    }
+                    SpecialistsPanel(store: env.specialists, coordinator: env.specialistDispatch)
                 case .buffs:
                     BuffsPanel(
                         buildingsStore: env.buildings,
-                        buffsStore: env.buffs
-                    ) { buffUid1, buffUid2, targetGrid in
-                        env.sender.send(DispatchBuffCommand(
-                            buffUid1: buffUid1,
-                            buffUid2: buffUid2,
-                            targetGrid: targetGrid))
-                    }
+                        buffsStore: env.buffs,
+                        coordinator: env.buffDispatch
+                    )
                 }
             }
             .frame(width: 320)
