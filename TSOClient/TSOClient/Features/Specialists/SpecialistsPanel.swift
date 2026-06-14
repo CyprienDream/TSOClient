@@ -13,8 +13,10 @@ struct SpecialistsPanel: View {
     private let filters: [SpecialistKind?] = [nil, .geologist, .explorer, .general]
 
     var filtered: [SpecialistsStore.SpecialistItem] {
-        guard let kind = filter else { return store.items }
-        return store.items.filter { $0.specialistType == kind }
+        let base = filter.map { kind in store.items.filter { $0.specialistType == kind } } ?? store.items
+        return base.sorted { lhs, rhs in
+            lhs.displayPrimary.localizedCaseInsensitiveCompare(rhs.displayPrimary) == .orderedAscending
+        }
     }
 
     private var idleInView: [SpecialistsStore.SpecialistItem] {

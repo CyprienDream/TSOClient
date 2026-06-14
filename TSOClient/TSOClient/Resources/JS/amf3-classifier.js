@@ -36,6 +36,8 @@
     };
     var GENERAL_TYPES = {
         0: 'General', 3: 'General',
+        13: 'MajorGeneral', 16: 'MasterOfMartialArtsGeneral',
+        36: 'FieldMedicGeneral', 63: 'GhostGeneral', 93: 'SmugglerGeneral',
     };
 
     function subtypeNameFor(t) {

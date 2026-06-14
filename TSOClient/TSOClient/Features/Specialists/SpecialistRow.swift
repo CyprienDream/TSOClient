@@ -45,10 +45,24 @@ struct SpecialistRow: View {
                 .background(Color.green, in: Capsule())
         } else if let startedAt = taskStartedAt {
             let elapsed = max(0, now.timeIntervalSince(startedAt))
-            if let key = spec.durationKey,
-               let learnedMs = learnedDurations[key] {
-                // Known duration from a previous completion — show remaining countdown.
-                let remaining = max(0, Double(learnedMs) / 1000.0 - elapsed)
+            // Prefer the registry estimate (uses subtype multiplier + skill effects).
+            // Fall back to learnedDurations for non-Explorer specialists. Fall back to
+            // elapsed (orange) if neither source has data.
+            let predicted: Double? = {
+                if let est = ExplorerDurationRegistry.estimate(
+                    task: TaskCode(actionType: spec.taskActionType ?? -1,
+                                   subTaskID: spec.taskSubTaskId ?? -1),
+                    subTypeId: spec.subTypeId,
+                    skills: spec.skills) {
+                    return est
+                }
+                if let key = spec.durationKey, let learnedMs = learnedDurations[key] {
+                    return Double(learnedMs) / 1000.0
+                }
+                return nil
+            }()
+            if let total = predicted {
+                let remaining = max(0, total - elapsed)
                 if remaining <= 0 {
                     Text("Done?")
                         .font(.caption2).foregroundStyle(.orange)
@@ -58,7 +72,6 @@ struct SpecialistRow: View {
                         .monospacedDigit()
                 }
             } else {
-                // No learned duration yet — show elapsed (orange) as honest fallback.
                 Text(DurationFormatter.format(elapsed))
                     .font(.caption2).foregroundStyle(.orange)
                     .monospacedDigit()
@@ -88,8 +101,8 @@ struct SpecialistRow: View {
             HStack {
                 Picker("Task", selection: $taskCode) {
                     ForEach(ExplorerTask.allCases) { t in
-                        if t.isAvailable(skills: spec.skills) {
-                            Text(t.label).tag(t.taskCode)
+                        if t.isAvailable(skillIDs: spec.skills.map(\.id)) {
+                            Text(labelWithEstimate(t)).tag(t.taskCode)
                         }
                     }
                 }
@@ -130,5 +143,12 @@ struct SpecialistRow: View {
         .buttonStyle(.borderedProminent)
         .controlSize(.small)
         .disabled(!spec.isIdle || !taskCode.isAvailable(for: spec, playerLevel: playerLevel))
+    }
+
+    private func labelWithEstimate(_ t: ExplorerTask) -> String {
+        guard let est = ExplorerDurationRegistry.estimate(
+            task: t.taskCode, subTypeId: spec.subTypeId, skills: spec.skills)
+        else { return t.label }
+        return "\(t.label) — \(DurationFormatter.format(est))"
     }
 }
