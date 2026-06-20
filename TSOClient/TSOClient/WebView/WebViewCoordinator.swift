@@ -22,6 +22,19 @@ final class WebViewCoordinator: NSObject, WKUIDelegate, WKNavigationDelegate, WK
         return nil
     }
 
+    // Block in-game buttons that navigate the main frame away from the game
+    // (e.g. the rankings button next to the star menu hits /redirect/rankings).
+    func webView(_ webView: WKWebView,
+                 decidePolicyFor navigationAction: WKNavigationAction,
+                 decisionHandler: @escaping (WKNavigationActionPolicy) -> Void) {
+        if let url = navigationAction.request.url, url.path.hasPrefix("/redirect/") {
+            logger.log("[TSO] Blocked navigation away from game: \(url.absoluteString)")
+            decisionHandler(.cancel)
+            return
+        }
+        decisionHandler(.allow)
+    }
+
     func webView(_ webView: WKWebView,
                  didFailProvisionalNavigation _: WKNavigation!,
                  withError error: Error) {

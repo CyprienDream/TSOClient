@@ -4,9 +4,17 @@ import Foundation
 //   t = base[task]
 //   for each skill with level>0: t = t * (1 - reduction[level-1]/100)  (when scope matches)
 //   t = t * 100 / timeBonus[subTypeId]
+//   if pfbActive (Prestigious Friend Buff): t = t * 0.8  (20% time reduction)
 // Returns nil when the base duration, the subtype's time bonus, or any required
 // piece is missing — the UI shows a dash rather than guessing.
 enum ExplorerDurationRegistry {
+
+    // Prestigious Friend Buff: per tsowiki.eu and fedorovvl/tso_client
+    // (user_exp_time_matrix.js, * 0.8 constant), explorers and geologists
+    // complete their tasks in 20% less time when the buff is active.
+    // Internal asset family: MultiplierBuffZone2_PremiumFriendBuff*.
+    static let pfbMultiplier: Double = 0.8
+
     static let baseDurations: [TaskCode: Int]    = loaded.base
     static let timeBonus:     [Int: Int]         = loaded.bonus
     static let skills:        [Int: SkillEffect] = loaded.skills
@@ -44,7 +52,8 @@ enum ExplorerDurationRegistry {
 
     static func estimate(task code: TaskCode,
                          subTypeId: Int,
-                         skills: [SpecialistSkill]) -> TimeInterval? {
+                         skills: [SpecialistSkill],
+                         pfbActive: Bool = false) -> TimeInterval? {
         guard let base = baseDurations[code], base > 0 else { return nil }
         guard let bonus = timeBonus[subTypeId], bonus > 0 else { return nil }
 
@@ -56,6 +65,7 @@ enum ExplorerDurationRegistry {
             t *= 1.0 - Double(eff.reduction[idx]) / 100.0
         }
         t = t * 100.0 / Double(bonus)
+        if pfbActive { t *= pfbMultiplier }
         return t
     }
 
@@ -83,7 +93,7 @@ enum ExplorerDurationRegistry {
     private static let loaded: Loaded = {
         guard let url = Bundle.main.url(forResource: "explorer-durations", withExtension: "json"),
               let data = try? Data(contentsOf: url) else {
-            print("[ExplorerDurationRegistry] explorer-durations.json not found")
+            ConsoleLogger().log("[ExplorerDurationRegistry] explorer-durations.json not found")
             return Loaded(base: [:], bonus: [:], skills: [:])
         }
         do {
@@ -106,7 +116,7 @@ enum ExplorerDurationRegistry {
             }
             return Loaded(base: base, bonus: bonus, skills: skillMap)
         } catch {
-            print("[ExplorerDurationRegistry] decode error: \(error)")
+            ConsoleLogger().log("[ExplorerDurationRegistry] decode error: \(error)")
             return Loaded(base: [:], bonus: [:], skills: [:])
         }
     }()

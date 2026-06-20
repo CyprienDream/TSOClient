@@ -15,12 +15,15 @@ struct CollectiblesHandler: InboundMessageHandler {
 
 struct SpecialistsHandler: InboundMessageHandler {
     let store: SpecialistsStore
+    let coordinator: SpecialistDispatchCoordinator
     let logger: Logger
     var type: String { "SPECIALISTS" }
     func apply(payloadData: Data) throws {
         let payload = try JSONDecoder().decode(InboundMessage.SpecialistsPayload.self, from: payloadData)
         store.apply(payload)
         logger.log("[TSO] Specialists received: \(payload.items.count)")
+        coordinator.runAutoExplorerLoop()
+        coordinator.runAutoGeologistLoop()
     }
 }
 
@@ -32,6 +35,22 @@ struct BuildingsHandler: InboundMessageHandler {
         let payload = try JSONDecoder().decode(InboundMessage.BuildingsPayload.self, from: payloadData)
         store.apply(payload)
         logger.log("[TSO] Buildings received: \(payload.items.count)")
+    }
+}
+
+// Updates SpecialistsStore.pfbActive from the JS auto-detection scan.
+// Logs every transition so the user can verify detection is working.
+struct PlayerBuffsHandler: InboundMessageHandler {
+    let store: SpecialistsStore
+    let logger: Logger
+    var type: String { "PLAYER_BUFFS" }
+    func apply(payloadData: Data) throws {
+        let payload = try JSONDecoder().decode(InboundMessage.PlayerBuffsPayload.self, from: payloadData)
+        let was = store.pfbActive
+        store.pfbActive = payload.pfbActive
+        if was != payload.pfbActive {
+            logger.log("[TSO] PFB \(payload.pfbActive ? "ACTIVE" : "inactive") (auto-detected)")
+        }
     }
 }
 

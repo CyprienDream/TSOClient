@@ -8,7 +8,7 @@ struct ContentView: View {
 
     var body: some View {
         HSplitView {
-            WebView(url: URL(string: "https://www.thesettlersonline.com/en/homepage")!, env: env)
+            WebView(url: URL(string: "https://www.thesettlersonline.com/en/play")!, env: env)
                 .frame(minWidth: 800, minHeight: 768)
 
             VStack(spacing: 0) {

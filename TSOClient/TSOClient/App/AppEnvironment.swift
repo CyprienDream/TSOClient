@@ -29,11 +29,17 @@ struct AppEnvironment {
         let sender = BridgeSender(logger: logger)
         self.sender = sender
 
+        let specialistDispatch = SpecialistDispatchCoordinator(
+            store: specialists, dispatcher: sender, logger: logger)
+        self.specialistDispatch = specialistDispatch
+
         let inbound = InboundDispatcher(logger: logger)
         inbound.register(CollectiblesHandler(store: collectibles))
-        inbound.register(SpecialistsHandler(store: specialists, logger: logger))
+        inbound.register(SpecialistsHandler(
+            store: specialists, coordinator: specialistDispatch, logger: logger))
         inbound.register(BuildingsHandler(store: buildings, logger: logger))
         inbound.register(BuffsHandler(store: buffs, logger: logger))
+        inbound.register(PlayerBuffsHandler(store: specialists, logger: logger))
         inbound.register(GameStateHandler(
             collectibles: collectibles,
             specialists: specialists,
@@ -43,8 +49,6 @@ struct AppEnvironment {
         ))
         self.inbound = inbound
 
-        self.specialistDispatch = SpecialistDispatchCoordinator(
-            store: specialists, dispatcher: sender, logger: logger)
         self.buffDispatch = BuffDispatchCoordinator(
             buffsStore: buffs,
             buildingsStore: buildings,

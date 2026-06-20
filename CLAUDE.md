@@ -15,6 +15,7 @@ The long-term goal is a full automation suite: collectible highlighting, explore
 
 ## Important
 The file `log.md` contains all findings of the investigation so far, the current state of the project, the details from the last session, and next steps for the current session.
+The file `amf-vo-keys.md` is a captured key reference for `dPlayerVO` and `dZoneVO` (the two top-level VOs on every zone-load response) — consult it before adding features that need zone-level data instead of re-deriving from a fresh capture.
 
 ## Where to find things
 

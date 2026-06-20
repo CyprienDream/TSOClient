@@ -37,6 +37,9 @@ struct SpecialistsPanel: View {
             } else {
                 bulkBar
                 bulkTaskPickers
+                playerBuffsSection
+                autoExplorerLoopSection
+                autoGeologistLoopSection
                 Divider()
                 List(filtered) { spec in
                     SpecialistRow(
@@ -45,6 +48,7 @@ struct SpecialistsPanel: View {
                         playerLevel: store.playerLevel,
                         taskStartedAt: store.taskStartedAt[spec.id],
                         learnedDurations: store.learnedDurations,
+                        pfbActive: store.pfbActive,
                         taskCode: Binding(
                             get: { coordinator.resolvedTaskCode(for: spec) },
                             set: { coordinator.selectedTasks[spec.id] = $0 }
@@ -155,6 +159,103 @@ struct SpecialistsPanel: View {
                         .frame(maxWidth: .infinity)
                     }
                 }
+            }
+            .padding(.horizontal, 10)
+            .padding(.vertical, 6)
+        }
+    }
+
+    // Active player-wide buffs that shorten specialist task durations. The
+    // Prestigious Friend Buff (20% reduction) is auto-detected by the JS
+    // scanner from PLAYER_BUFFS payloads; the toggle remains available as
+    // a manual override (each zone reload re-asserts the detected value).
+    @ViewBuilder
+    private var playerBuffsSection: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Divider()
+            Toggle(isOn: Binding(
+                get: { store.pfbActive },
+                set: { store.pfbActive = $0 }
+            )) {
+                Text("Prestigious Friend Buff (−20%)")
+                    .font(.caption).bold()
+            }
+            .toggleStyle(.switch)
+            .controlSize(.small)
+        }
+        .padding(.horizontal, 10)
+        .padding(.vertical, 6)
+    }
+
+    // Toggle + picker for the Stone Cold geologist sweep. Zone-refresh only
+    // for now — no per-uid timer — because geologist task durations aren't
+    // predictable enough yet to estimate completion. Hidden when filtered
+    // to a non-geologist view.
+    @ViewBuilder
+    private var autoGeologistLoopSection: some View {
+        if filter == nil || filter == .geologist {
+            VStack(alignment: .leading, spacing: 4) {
+                Divider()
+                HStack {
+                    Toggle(isOn: Binding(
+                        get: { coordinator.autoGeologistLoopEnabled },
+                        set: { coordinator.autoGeologistLoopEnabled = $0 }
+                    )) {
+                        Text("Auto-loop Stone Cold Geologists")
+                            .font(.caption).bold()
+                    }
+                    .toggleStyle(.switch)
+                    .controlSize(.small)
+                }
+                Picker("", selection: Binding(
+                    get: { coordinator.autoGeologistLoopTask },
+                    set: { coordinator.autoGeologistLoopTask = $0 }
+                )) {
+                    ForEach(GeologistTask.allCases) { t in
+                        Text(t.label(forPlayerLevel: store.playerLevel)).tag(t)
+                    }
+                }
+                .labelsHidden()
+                .frame(maxWidth: .infinity)
+                .disabled(coordinator.autoGeologistLoopEnabled)
+            }
+            .padding(.horizontal, 10)
+            .padding(.vertical, 6)
+        }
+    }
+
+    // Toggle + picker that keeps every explorer on the chosen task: a sweep
+    // runs on each fresh SPECIALISTS payload, and each dispatch arms a
+    // per-uid timer that re-fires when the task is predicted to end (so the
+    // loop continues mid-session without waiting for a zone reload). Hidden
+    // when filtered to a non-explorer view.
+    @ViewBuilder
+    private var autoExplorerLoopSection: some View {
+        if filter == nil || filter == .explorer {
+            VStack(alignment: .leading, spacing: 4) {
+                Divider()
+                HStack {
+                    Toggle(isOn: Binding(
+                        get: { coordinator.autoExplorerLoopEnabled },
+                        set: { coordinator.autoExplorerLoopEnabled = $0 }
+                    )) {
+                        Text("Auto-loop Explorers")
+                            .font(.caption).bold()
+                    }
+                    .toggleStyle(.switch)
+                    .controlSize(.small)
+                }
+                Picker("", selection: Binding(
+                    get: { coordinator.autoExplorerLoopTask },
+                    set: { coordinator.autoExplorerLoopTask = $0 }
+                )) {
+                    ForEach(ExplorerTask.allCases) { t in
+                        Text(t.label).tag(t)
+                    }
+                }
+                .labelsHidden()
+                .frame(maxWidth: .infinity)
+                .disabled(coordinator.autoExplorerLoopEnabled)
             }
             .padding(.horizontal, 10)
             .padding(.vertical, 6)

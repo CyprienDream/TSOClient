@@ -131,7 +131,26 @@
             // dPlayerVO: capture player level and collect full VO for buff inventory extraction.
             if (shortCls === 'dPlayerVO') {
                 if (typeof v.playerLevel === 'number') ctx.playerLevel = v.playerLevel;
+                // Snapshot identifying fields off every dPlayerVO encountered
+                // — we don't yet know which one is the local-player VO on
+                // adventure / visit responses, so log them all and decide.
+                ctx.playerVOSamples.push({
+                    userID:         (typeof v.userID === 'number')        ? v.userID        : null,
+                    zoneID:         (typeof v.zoneID === 'number')        ? v.zoneID        : null,
+                    landingZoneID:  (typeof v.landingZoneID === 'number') ? v.landingZoneID : null,
+                    playerLevel:    (typeof v.playerLevel === 'number')   ? v.playerLevel   : null,
+                    hasInventory:   Array.isArray((v.availableBuffs_vector || {}).source)
+                                    && v.availableBuffs_vector.source.length > 0,
+                });
                 ctx.playerVOs.push(v);
+            }
+            // dZoneVO ownership + identity — independent signal that doesn't
+            // depend on guessing which dPlayerVO is "ours".
+            if (shortCls === 'dZoneVO') {
+                if (typeof v.zoneOwnerPlayerID   === 'number') ctx.zoneOwnerPlayerID   = v.zoneOwnerPlayerID;
+                if (typeof v.zoneVisitorPlayerID === 'number') ctx.zoneVisitorPlayerID = v.zoneVisitorPlayerID;
+                if (typeof v.gameWorldName === 'string') ctx.gameWorldName = v.gameWorldName;
+                if (typeof v.adventureName === 'string') ctx.adventureName = v.adventureName;
             }
             if (isCollectibleBuilding(v)) {
                 ctx.items.push(v);
@@ -149,10 +168,28 @@
         }
 
         // dZoneVO carries map dimensions. Match by suffix to be tolerant of
-        // package paths; require both fields to be positive numbers.
+        // package paths; require both fields to be positive numbers. Also
+        // collect the VO itself so the PFB scanner can walk its keys.
         if (typeof v.mapWidth  === 'number' && v.mapWidth  > 0 &&
             typeof v.mapHeight === 'number' && v.mapHeight > 0) {
             ctx.maps.push({ w: v.mapWidth, h: v.mapHeight, cls: v.__class || '?' });
+            ctx.zoneVOs.push(v);
+        }
+
+        // Tree-wide PFB hit: any VO whose buffName_string names the
+        // Prestigious Friend Buff. Captured so we can log the parent
+        // class and field structure for AMF reverse-engineering.
+        if (v.__class &&
+            typeof v.buffName_string === 'string' &&
+            isPfbBuffName(v.buffName_string)) {
+            ctx.treePfbHits.push({
+                cls: v.__class,
+                name: v.buffName_string,
+                parentCls: (parent && parent.__class) ? parent.__class : '<root>',
+                keys: Object.keys(v).filter(function(k) { return k !== '__class'; }).join(','),
+                insertedAt: v.insertedAt,
+                endTime: v.endTime,
+            });
         }
 
         var nextParent = meaningfulParent(v) ? v : parent;
@@ -180,8 +217,246 @@
             destructed:   [],    // DestructBuildingResultVO instances (pickup events)
             specialists:  [],    // dSpecialistVO instances
             playerVOs:    [],    // dPlayerVO instances (for buff inventory)
+            zoneVOs:      [],    // dZoneVO instances (PFB / zone-buff candidates)
             serverClock:  null,  // dServerActionResult.clientTime (most recent in this response)
             playerLevel:  null,  // dPlayerVO.playerLevel (set on zone-load responses)
+            playerVOSamples: [], // {userID, zoneID, landingZoneID, playerLevel, hasInventory} per dPlayerVO
+            zoneOwnerPlayerID:   null,
+            zoneVisitorPlayerID: null,
+            gameWorldName: null,
+            adventureName: null,
+            treePfbHits:  [],    // VOs in the tree whose buffName_string names PFB
+        };
+    }
+
+    // ── PFB (Prestigious Friend Buff) auto-detection ─────────────────────
+    // Internal asset family: MultiplierBuffZone2_PremiumFriendBuff*.
+    // The active-buff vector field name isn't known yet — we scan every
+    // candidate key on dPlayerVO + dZoneVO that holds a vector of objects
+    // with buffName_string, and any whose name matches counts as active
+    // (excluding the player's inventory at availableBuffs_vector).
+
+    function isPfbBuffName(name) {
+        if (typeof name !== 'string') return false;
+        // PremiumFriendBuff catches every variant (1Day/7Day/15Day). The
+        // broader "MultiplierBuffZone" match was dropped — it false-positives
+        // on MultiplierBuffZone1 and the Premium Compensation Buff, which
+        // are *not* PFB.
+        return name.indexOf('PremiumFriendBuff') >= 0;
+    }
+
+    // Module-level dedup: per (rootClass, fieldName), log the discovery
+    // once. PFB-positive hits always re-log so the user can confirm the
+    // auto-detection is firing on every payload it should.
+    var _pfbVecLoggedFields  = {};
+    // One-shot dumps so we don't re-flood the log after the first capture.
+    var _pfbDumpedRootKeys      = {};
+    var _pfbDumpedBuffClasses   = false;
+    var _pfbDumpedAllAppliances = false;
+
+    // Known buff-definition IDs that mean "active Prestigious Friend Buff".
+    // dPersistedBuffApplianceVO.buffID is a numeric reference to the buff
+    // definition; the appliance never carries the name string. Confirmed on
+    // 2026-06-14: buffID 663 = MultiplierBuffZone2_PremiumFriendBuff15Day
+    // on realm r03 (user's friend applied the 15-day variant; inventory
+    // also contained an unrelated 1Day token). 1Day and 7Day variant IDs
+    // are unconfirmed — capture them from a fresh [PFB:appliance.all]
+    // dump when those are seen and add them here.
+    var PFB_BUFF_IDS = { 663: '15Day' };
+
+    // Best-effort summary of a single field value so the one-shot key dump
+    // is human-readable: "Array len=12", "dRunningBuffVO", "number(1234)",
+    // "vec<dBuffVO>[217]", etc. Tells us which fields *might* hold buffs
+    // without having to dump the whole tree.
+    function summarizeField(v) {
+        if (v == null) return 'null';
+        if (typeof v !== 'object') return typeof v + '(' + String(v).slice(0, 30) + ')';
+        if (Array.isArray(v)) {
+            var first = v[0];
+            return 'Array[' + v.length + ']' + (first && first.__class
+                ? '<' + first.__class.split('.').pop() + '>' : '');
+        }
+        if (Array.isArray(v.source)) {
+            var firstS = v.source[0];
+            return 'Vector[' + v.source.length + ']' + (firstS && firstS.__class
+                ? '<' + firstS.__class.split('.').pop() + '>' : '');
+        }
+        return (v.__class ? v.__class.split('.').pop() : 'object') +
+               '{' + Object.keys(v).slice(0, 4).join(',') + '}';
+    }
+
+    function dumpRootKeysOnce(root, rootCls) {
+        if (!root || _pfbDumpedRootKeys[rootCls]) return;
+        _pfbDumpedRootKeys[rootCls] = true;
+        var keys = Object.keys(root);
+        for (var i = 0; i < keys.length; i++) {
+            var k = keys[i];
+            if (k === '__class') continue;
+            webkit.messageHandlers.logger.postMessage(
+                '[PFB:rootkey] ' + rootCls + '.' + k + ' = ' + summarizeField(root[k])
+            );
+        }
+    }
+
+    function scanForPlayerBuffs(ctx) {
+        var pfbActive    = false;
+        var vectorsSeen  = 0;
+        var pfbHits      = 0;
+        var pfbFromField = null;   // first field where we found a hit (debug)
+
+        // First-time dump of every key on dPlayerVO / dZoneVO so we can spot
+        // candidates the vector scan misses: scalars (timestamps), single
+        // VOs (a buff reference), or differently-named buff vectors.
+        for (var pi0 = 0; pi0 < ctx.playerVOs.length; pi0++) {
+            dumpRootKeysOnce(ctx.playerVOs[pi0], 'dPlayerVO');
+        }
+        for (var zi0 = 0; zi0 < ctx.zoneVOs.length;   zi0++) {
+            dumpRootKeysOnce(ctx.zoneVOs[zi0],   'dZoneVO');
+        }
+
+        // First-time dump of every class name containing "Buff" and its
+        // count, so we can see whether anything other than dBuffVO exists
+        // (e.g. dRunningBuffVO, dActiveBuffVO, dZoneBuffVO).
+        if (!_pfbDumpedBuffClasses) {
+            var buffClasses = [];
+            for (var clsName in ctx.classes) {
+                if (clsName.toLowerCase().indexOf('buff') >= 0) {
+                    buffClasses.push(clsName.split('.').pop() + '=' + ctx.classes[clsName]);
+                }
+            }
+            if (buffClasses.length > 0) {
+                _pfbDumpedBuffClasses = true;
+                buffClasses.sort();
+                webkit.messageHandlers.logger.postMessage(
+                    '[PFB:buffclasses] ' + buffClasses.join(', ')
+                );
+            }
+        }
+
+        function scanRoot(root, rootCls) {
+            if (!root) return;
+            var keys = Object.keys(root);
+            for (var i = 0; i < keys.length; i++) {
+                var key = keys[i];
+                if (key === '__class') continue;
+                var v = root[key];
+                if (v == null) continue;
+                var list = unwrapCollection(v);
+                if (list.length === 0) continue;
+                var first = list[0];
+                if (!first || typeof first !== 'object') continue;
+                if (typeof first.buffName_string !== 'string') continue;
+
+                vectorsSeen++;
+                var hits = 0;
+                var sampleHit = null;
+                for (var li = 0; li < list.length; li++) {
+                    var b = list[li];
+                    if (b && isPfbBuffName(b.buffName_string)) {
+                        hits++;
+                        if (!sampleHit) sampleHit = b;
+                    }
+                }
+                pfbHits += hits;
+
+                // availableBuffs_vector is the inventory of buffs the player
+                // owns — a PFB token there isn't "active", it's stocked. Any
+                // OTHER vector with a PFB-named entry counts as active.
+                var isInventory = (key === 'availableBuffs_vector');
+                if (hits > 0 && !isInventory) {
+                    pfbActive = true;
+                    if (!pfbFromField) pfbFromField = rootCls + '.' + key;
+                }
+
+                var dedupKey = rootCls + '.' + key;
+                var alreadyLogged = !!_pfbVecLoggedFields[dedupKey];
+                if (!alreadyLogged || hits > 0) {
+                    _pfbVecLoggedFields[dedupKey] = true;
+                    webkit.messageHandlers.logger.postMessage(
+                        '[PFB:vec] ' + dedupKey +
+                        ' total=' + list.length +
+                        ' pfbHits=' + hits +
+                        (isInventory ? ' (inventory)' : '') +
+                        ' first.cls=' + (first.__class || '?') +
+                        ' first.name=' + first.buffName_string
+                    );
+                    if (sampleHit) {
+                        webkit.messageHandlers.logger.postMessage(
+                            '[PFB:vec.sample] ' + dedupKey + ' ' +
+                            JSON.stringify(sampleHit).slice(0, 600)
+                        );
+                    }
+                }
+            }
+        }
+
+        for (var pi = 0; pi < ctx.playerVOs.length; pi++) scanRoot(ctx.playerVOs[pi], 'dPlayerVO');
+        for (var zi = 0; zi < ctx.zoneVOs.length;   zi++) scanRoot(ctx.zoneVOs[zi],   'dZoneVO');
+
+        // BuffAppliance walk: dZoneVO.zoneBuffs is a Vector of
+        // dPersistedBuffApplianceVO representing currently-active zone-wide
+        // buffs (incl. PFB). The appliance references its buff definition
+        // by numeric `buffID` only — it never carries the name string —
+        // so detection is an ID lookup against PFB_BUFF_IDS.
+        var applianceCount = 0;
+        var pfbAppliances  = 0;
+        var seenBuffIDs    = [];   // diagnostic: all buffIDs seen this payload
+        function scanApplianceVectors(root, rootCls) {
+            if (!root) return;
+            var keys = Object.keys(root);
+            for (var i = 0; i < keys.length; i++) {
+                var k = keys[i];
+                if (k === '__class') continue;
+                var list = unwrapCollection(root[k]);
+                if (list.length === 0) continue;
+                var first = list[0];
+                if (!first || typeof first !== 'object' || !first.__class) continue;
+                if (first.__class.indexOf('BuffAppliance') < 0) continue;
+
+                // One-shot full dump of every appliance in this vector so
+                // unknown PFB variants (7Day/15Day) can be identified by ID.
+                if (!_pfbDumpedAllAppliances) {
+                    _pfbDumpedAllAppliances = true;
+                    for (var di = 0; di < list.length; di++) {
+                        webkit.messageHandlers.logger.postMessage(
+                            '[PFB:appliance.all] ' + rootCls + '.' + k +
+                            '[' + di + '] = ' + JSON.stringify(list[di]).slice(0, 800)
+                        );
+                    }
+                }
+
+                for (var li = 0; li < list.length; li++) {
+                    var appl = list[li];
+                    if (!appl || typeof appl !== 'object') continue;
+                    applianceCount++;
+                    var id = (typeof appl.buffID === 'number') ? appl.buffID : null;
+                    if (id != null) seenBuffIDs.push(id);
+                    if (id != null && PFB_BUFF_IDS.hasOwnProperty(id)) {
+                        pfbAppliances++;
+                        pfbActive = true;
+                        if (!pfbFromField) pfbFromField = rootCls + '.' + k;
+                        webkit.messageHandlers.logger.postMessage(
+                            '[PFB:appliance.hit] ' + rootCls + '.' + k +
+                            '[' + li + '] buffID=' + id +
+                            ' variant=' + PFB_BUFF_IDS[id] +
+                            ' startTime=' + appl.startTime +
+                            ' applianceMode=' + appl.applianceMode
+                        );
+                    }
+                }
+            }
+        }
+        for (var pi2 = 0; pi2 < ctx.playerVOs.length; pi2++) scanApplianceVectors(ctx.playerVOs[pi2], 'dPlayerVO');
+        for (var zi2 = 0; zi2 < ctx.zoneVOs.length;   zi2++) scanApplianceVectors(ctx.zoneVOs[zi2],   'dZoneVO');
+
+        return {
+            pfbActive:       pfbActive,
+            vectorsSeen:     vectorsSeen,
+            pfbHits:         pfbHits,
+            fromField:       pfbFromField,
+            appliancesSeen:  applianceCount,
+            pfbAppliances:   pfbAppliances,
+            seenBuffIDs:     seenBuffIDs,
         };
     }
 
@@ -189,6 +464,31 @@
 
     var _cachedMapWidth  = 0, _cachedMapHeight = 0;  // retained across pickup responses
     var _prevCollectibles = null;  // null until first zone-load; {gridIndex→item} thereafter
+    var _lastZoneKey = undefined;  // (zoneOwnerPlayerID, zoneVisitorPlayerID) tuple — transition key
+
+    // ── Home-zone gate ──────────────────────────────────────────────────
+    // Features (panel updates, auto-loop) only run on the local player's
+    // own non-adventure zone. We cache `_homeZoneID` on the first home
+    // observation (owner == visitor && no adventureName) and then gate
+    // every subsequent payload by comparing the current auth-ctx zoneID
+    // (updated by amf3-net.js from outbound calls — fires reliably even
+    // when returning home from a cache-hit response carrying no dZoneVO).
+    var _homeZoneID = null;
+
+    function currentAuthZoneID() {
+        var a = window._tsoAuthCtx;
+        return (a && typeof a.zoneID === 'number') ? a.zoneID : null;
+    }
+
+    function isOnHome(ctx) {
+        if (_homeZoneID !== null) return currentAuthZoneID() === _homeZoneID;
+        // Cache not yet populated. Only treat the very first home-style
+        // observation (owner == visitor && no adventure) as on-home so we
+        // don't accidentally emit on a friend-island first launch.
+        return ctx.zoneOwnerPlayerID !== null &&
+               ctx.zoneOwnerPlayerID === ctx.zoneVisitorPlayerID &&
+               !ctx.adventureName;
+    }
 
     function buildResult(ctx) {
         var map = ctx.maps[0] || { w: _cachedMapWidth, h: _cachedMapHeight };
@@ -281,6 +581,48 @@
         // Settings/auth have none of these; destruct-only pickup responses have ctx.destructed.
         if (ctx.items.length === 0 && ctx.maps.length === 0 &&
             ctx.allBuildings.length === 0 && ctx.destructed.length === 0) return;
+
+        // ── Home-zone diagnostic + gate ─────────────────────────────────────
+        // Log on every (owner, visitor) transition so we can see home→visit
+        // →adventure moves in the console. Done up here so the line still
+        // appears when we're off-home and the rest of the pipeline is skipped.
+        if (ctx.zoneOwnerPlayerID !== null || ctx.zoneVisitorPlayerID !== null) {
+            var key = ctx.zoneOwnerPlayerID + ':' + ctx.zoneVisitorPlayerID;
+            if (key !== _lastZoneKey) {
+                _lastZoneKey = key;
+                var samples = ctx.playerVOSamples.map(function(s) {
+                    return 'user=' + s.userID +
+                           ' zone=' + s.zoneID +
+                           ' land=' + s.landingZoneID +
+                           ' lvl=' + s.playerLevel +
+                           ' inv=' + s.hasInventory;
+                }).join(' | ');
+                webkit.messageHandlers.logger.postMessage(
+                    '[HomeZone] owner=' + ctx.zoneOwnerPlayerID +
+                    ' visitor=' + ctx.zoneVisitorPlayerID +
+                    ' world=' + ctx.gameWorldName +
+                    ' adv=' + ctx.adventureName +
+                    ' playerVOs=' + ctx.playerVOSamples.length +
+                    (samples ? ' [' + samples + ']' : '')
+                );
+            }
+        }
+
+        // Cache the home zoneID the first time we see a home-style payload.
+        // After that, the gate runs purely off auth-ctx.zoneID.
+        var onHome = isOnHome(ctx);
+        if (onHome && _homeZoneID === null) {
+            var cur = currentAuthZoneID();
+            if (typeof cur === 'number' && cur > 0) {
+                _homeZoneID = cur;
+                window._tsoHomeZoneID = cur;
+                webkit.messageHandlers.logger.postMessage(
+                    '[HomeZone] cached homeZoneID=' + _homeZoneID
+                );
+            }
+        }
+        window._tsoOnHome = onHome;
+        if (!onHome) return;  // freeze panel + suppress auto-loop while away
 
         // ── DestructBuildingResultVO: pickup with no full building list ────────
         // If the server sends only a destruct event (no updated building array),
@@ -536,6 +878,38 @@
                 webkit.messageHandlers.logger.postMessage(
                     '[AMF3:buffs] total=' + buffItems.length + ' | ' + buffSummary);
             }
+        }
+
+        // ── PFB scan + bridge emission ──────────────────────────────────────
+        // Runs on every payload that has any player/zone data. Logs a one-line
+        // summary so the user can confirm detection ran; emits PLAYER_BUFFS
+        // back to Swift so SpecialistsStore.pfbActive can auto-track. Also
+        // dumps any tree-wide PFB-named VOs (deduped by class/name) so we can
+        // reverse-engineer the active-buff field once we see live data.
+        if (ctx.playerVOs.length > 0 || ctx.zoneVOs.length > 0) {
+            var scan = scanForPlayerBuffs(ctx);
+            for (var ti = 0; ti < ctx.treePfbHits.length && ti < 5; ti++) {
+                var h = ctx.treePfbHits[ti];
+                webkit.messageHandlers.logger.postMessage(
+                    '[PFB:tree] cls=' + h.cls +
+                    ' name=' + h.name +
+                    ' parent=' + h.parentCls +
+                    ' keys=' + h.keys +
+                    ' insertedAt=' + h.insertedAt +
+                    ' endTime=' + h.endTime
+                );
+            }
+            webkit.messageHandlers.logger.postMessage(
+                '[PFB:summary] active=' + scan.pfbActive +
+                ' vectorsScanned=' + scan.vectorsSeen +
+                ' hitsInVectors=' + scan.pfbHits +
+                ' hitsInTree=' + ctx.treePfbHits.length +
+                ' appliances=' + scan.appliancesSeen +
+                ' pfbAppliances=' + scan.pfbAppliances +
+                ' buffIDs=[' + scan.seenBuffIDs.join(',') + ']' +
+                (scan.fromField ? ' field=' + scan.fromField : '')
+            );
+            window._tsoSend('PLAYER_BUFFS', { pfbActive: scan.pfbActive });
         }
 
         // Track current collectible set so DestructBuildingResultVO can remove the right entry.

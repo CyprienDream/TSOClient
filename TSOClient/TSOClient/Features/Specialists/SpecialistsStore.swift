@@ -8,6 +8,12 @@ final class SpecialistsStore {
     var serverTime: Double? = nil
     var serverTimeCapturedAt: Date? = nil
 
+    // Prestigious Friend Buff (MultiplierBuffZone2_PremiumFriendBuff*). When
+    // toggled on, every explorer/geologist duration estimate is multiplied
+    // by ExplorerDurationRegistry.pfbMultiplier (0.8). Manual toggle for
+    // now — we don't currently parse the active-buff vector from AMF.
+    var pfbActive: Bool = false
+
     let formatter: SpecialistDisplayFormatter
     let learner: SpecialistDurationLearner
 
@@ -22,7 +28,7 @@ final class SpecialistsStore {
     }
 
     func apply(_ payload: InboundMessage.SpecialistsPayload) {
-        learner.process(payload: payload, formatter: formatter)
+        learner.process(payload: payload, formatter: formatter, pfbActive: pfbActive)
 
         items = payload.items.map {
             SpecialistItem(

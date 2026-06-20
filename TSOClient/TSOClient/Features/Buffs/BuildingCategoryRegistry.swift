@@ -12,13 +12,13 @@ enum BuildingCategoryRegistry {
     private static func load() -> [BuildingCategory] {
         guard let url = Bundle.main.url(forResource: "building-categories", withExtension: "json"),
               let data = try? Data(contentsOf: url) else {
-            print("[BuildingCategoryRegistry] building-categories.json not found")
+            ConsoleLogger().log("[BuildingCategoryRegistry] building-categories.json not found")
             return []
         }
         do {
             return try JSONDecoder().decode([BuildingCategory].self, from: data)
         } catch {
-            print("[BuildingCategoryRegistry] decode error: \(error)")
+            ConsoleLogger().log("[BuildingCategoryRegistry] decode error: \(error)")
             return []
         }
     }
