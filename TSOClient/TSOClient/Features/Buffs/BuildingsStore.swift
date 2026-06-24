@@ -24,19 +24,6 @@ final class BuildingsStore {
         let activeBuff: String? // buffName_string of first active buff, nil if unbuffed
     }
 
-    // Buildings matching a skin filter, grouped by skinBase, sorted by name then grid.
-    // Pass nil to get all buildings.
-    func grouped(containing filter: String?) -> [(skin: String, buildings: [BuildingItem])] {
-        var groups: [String: [BuildingItem]] = [:]
-        for b in items {
-            if let f = filter, !b.skinBase.localizedCaseInsensitiveContains(f) { continue }
-            groups[b.skinBase, default: []].append(b)
-        }
-        return groups
-            .sorted { $0.key < $1.key }
-            .map { (skin: $0.key, buildings: $0.value.sorted { $0.gridIndex < $1.gridIndex }) }
-    }
-
     // All buildings whose skinBase is any of `bases`, sorted by gridIndex.
     // Backed by the prebuilt index — safe to call from view bodies.
     func buildings(matchingSkinBases bases: [String]) -> [BuildingItem] {
