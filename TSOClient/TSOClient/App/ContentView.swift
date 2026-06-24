@@ -10,7 +10,7 @@ struct ContentView: View {
         HSplitView {
             WebView(
                 url: URL(string: "https://www.thesettlersonline.com/en/play")!,
-                bridge: env.sender,
+                executor: env.executor,
                 inbound: env.inbound,
                 logger: env.logger
             )

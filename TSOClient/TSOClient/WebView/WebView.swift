@@ -4,10 +4,10 @@ import WebKit
 struct WebView: NSViewRepresentable {
     let url: URL
     // Narrow injection: WebView only needs to (a) hand the WKWebView to the
-    // Swift→JS sender and (b) construct a coordinator that routes inbound
-    // messages. Passing `AppEnvironment` whole coupled the view to every
-    // store field, including ones it never touches.
-    let bridge: BridgeSender
+    // JS executor (late binding) and (b) construct a coordinator that
+    // routes inbound messages. The executor owns the WKWebView reference
+    // so BridgeSender stays decoupled from WebKit.
+    let executor: WKWebViewJSExecutor
     let inbound: InboundDispatcher
     let logger: Logger
 
@@ -31,7 +31,7 @@ struct WebView: NSViewRepresentable {
 
         webView.isInspectable = true
         context.coordinator.webView = webView
-        bridge.webView = webView  // Assign before any UI can trigger a dispatch.
+        executor.webView = webView  // Assign before any UI can trigger a dispatch.
         return webView
     }
 
