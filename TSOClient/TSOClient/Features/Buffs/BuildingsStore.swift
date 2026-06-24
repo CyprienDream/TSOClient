@@ -8,6 +8,12 @@ final class BuildingsStore {
     // lookups are O(1) dict hits instead of O(N) filters + regex per render.
     private(set) var bySkinBase: [String: [BuildingItem]] = [:]
 
+    private let normalizer: BuildingSkinNormalizer
+
+    init(normalizer: BuildingSkinNormalizer = .default) {
+        self.normalizer = normalizer
+    }
+
     struct BuildingItem: Identifiable {
         var id: String { "\(uid1):\(uid2)" }
         let gridIndex: Int
@@ -43,16 +49,11 @@ final class BuildingsStore {
     }
 
     func apply(_ payload: InboundMessage.BuildingsPayload) {
-        // Regex compiled once, reused across all 586+ items.
-        let suffix = try! NSRegularExpression(pattern: #"_\d+$"#)
         let newItems: [BuildingItem] = payload.items.map {
-            let s = $0.skin
-            let range = NSRange(s.startIndex..., in: s)
-            let base = suffix.stringByReplacingMatches(in: s, range: range, withTemplate: "")
-            return BuildingItem(
+            BuildingItem(
                 gridIndex: $0.gridIndex,
-                skin: s,
-                skinBase: base,
+                skin: $0.skin,
+                skinBase: normalizer.base(of: $0.skin),
                 uid1: $0.uid1,
                 uid2: $0.uid2,
                 activeBuff: $0.activeBuff
