@@ -14,7 +14,7 @@
     "ProductivityBuffLvl300":            "Aunt Irma's Feast",
     "ProductivityBuffLvl3":              "Aunt Irma's Basket",
     "ProductivityBuffLvl10":             "Stadium Snacks",
-    "ProductivityBuffSunflowerFerilizer": "Sunflower Fertilizer"
+    "ProductivityBuffSunflowerFertilizer": "Sunflower Fertilizer"
   },
   "buildings": {
     "WoodCutter":       "Pinewood Cutter",

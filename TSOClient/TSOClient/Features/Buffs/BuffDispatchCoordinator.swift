@@ -15,6 +15,7 @@ final class BuffDispatchCoordinator {
     private let dispatcher: BuffDispatchPort
     private let classifier: BuffCategoryClassifier
     private let categoryRegistry: BuildingCategoryRegistry
+    private let ignored: IgnoredBuildingsRegistry
     private let naming: NamingRegistry
     private let bulk: BulkDispatching
     private let logger: Logger
@@ -24,6 +25,7 @@ final class BuffDispatchCoordinator {
          dispatcher: BuffDispatchPort,
          classifier: BuffCategoryClassifier = .default,
          categoryRegistry: BuildingCategoryRegistry = .default,
+         ignored: IgnoredBuildingsRegistry = .default,
          naming: NamingRegistry = .default,
          bulk: BulkDispatching = BulkDispatcher.default,
          logger: Logger = ConsoleLogger()) {
@@ -32,6 +34,7 @@ final class BuffDispatchCoordinator {
         self.dispatcher = dispatcher
         self.classifier = classifier
         self.categoryRegistry = categoryRegistry
+        self.ignored = ignored
         self.naming = naming
         self.bulk = bulk
         self.logger = logger
@@ -43,6 +46,19 @@ final class BuffDispatchCoordinator {
 
     // Fallback for any category lacking an explicit defaultBuff.
     private static let fallbackDefaultBuff = "ProductivityBuffLvl300"
+
+    // Recognized tribute suffixes (case-insensitive). Order matters: the
+    // longer `_mini_gold` must be checked first so we don't strip just
+    // `_mini` from `Bookbinder_Mini_Gold` and leave a stray `_Gold` tail.
+    private static let tributeSuffixes = ["_mini_gold", "_mini"]
+
+    static func tributeStem(of skinBase: String) -> String? {
+        let lower = skinBase.lowercased()
+        for suffix in tributeSuffixes where lower.hasSuffix(suffix) {
+            return String(skinBase.dropLast(suffix.count))
+        }
+        return nil
+    }
 
     var groups: [(category: BuildingCategory, buildings: [BuildingsStore.BuildingItem])] {
         var snapshot = categoryRegistry.categories
@@ -59,20 +75,32 @@ final class BuffDispatchCoordinator {
     }
 
     // Surface any building skinBase not covered by the registry as its own
-    // synthetic category in the "Unmapped" group. Each gets a humanized name
-    // from NamingRegistry, no default buff, and is skipped by master ops.
+    // synthetic category. `_mini` skins are routed to the Tributes group with
+    // an "X Tribute" display label; ignored skinBases (non-buffable structures
+    // listed in ignored-buildings.json) are dropped entirely; everything else
+    // lands in Unmapped. None get a default buff — user must opt in per row.
     private func unmappedGroups() -> [(category: BuildingCategory, buildings: [BuildingsStore.BuildingItem])] {
         let mappedBases = Set(categoryRegistry.categories.flatMap { $0.skinBases })
-        let unmappedBases = buildingsStore.bySkinBase.keys
+        let leftoverBases = buildingsStore.bySkinBase.keys
             .filter { !mappedBases.contains($0) }
             .sorted()
-        return unmappedBases.compactMap { base in
+        return leftoverBases.compactMap { base in
             guard let buildings = buildingsStore.bySkinBase[base], !buildings.isEmpty else { return nil }
+            if ignored.shouldIgnore(skinBase: base) { return nil }
+            let displayName: String
+            let group: BuildingGroup
+            if let stem = Self.tributeStem(of: base) {
+                displayName = naming.buildingName(skinBase: stem) + " Tribute"
+                group = .tributes
+            } else {
+                displayName = naming.buildingName(skinBase: base)
+                group = .unmapped
+            }
             let category = BuildingCategory(
-                displayName: naming.buildingName(skinBase: base),
+                displayName: displayName,
                 skinBases: [base],
-                defaultBuff: nil,
-                group: BuildingGroup.unmapped.rawValue
+                defaultBuff: "",
+                group: group.rawValue
             )
             return (category, buildings)
         }
