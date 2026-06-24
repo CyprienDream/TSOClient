@@ -17,6 +17,18 @@ final class MockKeyValueStore: KeyValueStore {
         storage[key] as? [String: Any]
     }
 
+    func bool(forKey key: String) -> Bool {
+        storage[key] as? Bool ?? false
+    }
+
+    func string(forKey key: String) -> String? {
+        storage[key] as? String
+    }
+
+    func object(forKey key: String) -> Any? {
+        storage[key]
+    }
+
     func set(_ value: Any?, forKey key: String) {
         setHistory.append((key, value))
         if let value { storage[key] = value }
@@ -37,8 +49,47 @@ final class MockResourceLoader: ResourceLoader {
     }
 }
 
-// Records every command sent so tests can assert on type and payload.
-final class CapturingDispatcher: OutboundDispatching {
+// DurationEstimator backed by a closure so tests can pass arbitrary estimate
+// behavior. timeBonus is fixed at 100 (matching non-explorer subtypes) since
+// no current test exercises bonus-aware learning paths.
+final class FakeDurationEstimator: DurationEstimator {
+    var estimateFn: (TaskCode, Int, [SpecialistSkill]) -> TimeInterval?
+
+    init(_ estimateFn: @escaping (TaskCode, Int, [SpecialistSkill]) -> TimeInterval?) {
+        self.estimateFn = estimateFn
+    }
+
+    func estimate(task: TaskCode,
+                  subTypeId: Int,
+                  skills: [SpecialistSkill],
+                  pfbActive: Bool) -> TimeInterval? {
+        estimateFn(task, subTypeId, skills)
+    }
+
+    func timeBonus(subTypeId: Int) -> Int { 100 }
+}
+
+// Records every command the coordinators try to dispatch. Conforms to both
+// dispatch ports so a single instance works for specialist + buff tests.
+// Synthesises the real WireCommand structs so tests can keep asserting via
+// `as? DispatchSpecialistCommand` / `as? DispatchBuffCommand`.
+final class CapturingDispatcher: SpecialistDispatchPort, BuffDispatchPort {
     private(set) var sent: [WireCommand] = []
-    func send(_ command: WireCommand) { sent.append(command) }
+
+    func dispatchSpecialist(uid1: Int,
+                            uid2: Int,
+                            actionType: Int,
+                            subTaskID: Int,
+                            targetGrid: Int) {
+        sent.append(DispatchSpecialistCommand(
+            uid1: uid1, uid2: uid2,
+            actionType: actionType, subTaskID: subTaskID,
+            targetGrid: targetGrid))
+    }
+
+    func dispatchBuff(buffUid1: Int, buffUid2: Int, targetGrid: Int) {
+        sent.append(DispatchBuffCommand(
+            buffUid1: buffUid1, buffUid2: buffUid2,
+            targetGrid: targetGrid))
+    }
 }

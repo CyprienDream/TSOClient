@@ -56,12 +56,12 @@ struct NamingRegistryTests {
 
 @Suite("BuffCategoryClassifier")
 struct BuffCategoryClassifierTests {
-    private let classifier = BuffCategoryClassifier(
-        buildingBuffs: BuffCategoryClassifier.Rule(
+    private let classifier = BuffCategoryClassifier(rules: [
+        .buildingBuffs: BuffCategoryClassifier.Rule(
             prefixes: ["ProductivityBuff"],
             exact:    ["RemoveBuff", "HalloweenEvent_Horror"]
         )
-    )
+    ])
 
     @Test func exactMatch() {
         #expect(classifier.isBuildingBuff("RemoveBuff"))
