@@ -36,7 +36,7 @@ struct AppEnvironment {
         let inbound = InboundDispatcher(logger: logger)
         inbound.register(CollectiblesHandler(store: collectibles))
         inbound.register(SpecialistsHandler(
-            store: specialists, coordinator: specialistDispatch, logger: logger))
+            store: specialists, autoLoop: specialistDispatch, logger: logger))
         inbound.register(BuildingsHandler(store: buildings, logger: logger))
         inbound.register(BuffsHandler(store: buffs, logger: logger))
         inbound.register(PlayerBuffsHandler(store: specialists, logger: logger))
