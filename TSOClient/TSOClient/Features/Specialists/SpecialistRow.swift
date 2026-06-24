@@ -5,7 +5,10 @@ struct SpecialistRow: View {
     let formatter: SpecialistDisplayFormatter
     let playerLevel: Int?
     let taskStartedAt: Date?
-    let learnedDurations: [String: Int]
+    // Pre-resolved per-row lookup result (nil if the registry / learner
+    // had no entry for spec.durationKey). Narrower than passing the whole
+    // [String: Int] dict; the lookup happens once in the panel.
+    let learnedDurationMs: Int?
     let pfbActive: Bool
     // Driven by a single panel-level tick so we don't spin up one Timer per row.
     let now: Date
@@ -72,7 +75,7 @@ struct SpecialistRow: View {
                     pfbActive: pfbActive) {
                     return est
                 }
-                if let key = spec.durationKey, let learnedMs = learnedDurations[key] {
+                if let learnedMs = learnedDurationMs {
                     return Double(learnedMs) / 1000.0
                 }
                 return nil

@@ -51,8 +51,8 @@ struct SpecialistsPanel: View {
                         spec: spec,
                         formatter: store.formatter,
                         playerLevel: store.playerLevel,
-                        taskStartedAt: store.taskStartedAt[spec.id],
-                        learnedDurations: store.learnedDurations,
+                        taskStartedAt: store.learner.taskStartedAt(uid: spec.id),
+                        learnedDurationMs: spec.durationKey.flatMap { store.learner.learnedDurationMs(forKey: $0) },
                         pfbActive: store.pfbActive,
                         now: now,
                         taskCode: Binding(
