@@ -5,8 +5,15 @@ import Foundation
 // side, and so each call's outbound auth/seq capture has time to settle
 // before the next.
 //
-// Default delay 80 ms; tests inject a shorter value via init.
-struct BulkDispatcher {
+// Coordinators depend on the BulkDispatching protocol so tests can
+// substitute a zero-delay fake runner without sleeping through the
+// production 80 ms gap.
+protocol BulkDispatching {
+    @discardableResult
+    func run<T>(items: [T], action: @MainActor @escaping (Int, T) -> Void) -> Task<Void, Never>
+}
+
+struct BulkDispatcher: BulkDispatching {
     let interCallDelayNs: UInt64
 
     init(interCallDelayNs: UInt64 = 80_000_000) {

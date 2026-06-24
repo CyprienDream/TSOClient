@@ -14,19 +14,22 @@ final class BuffDispatchCoordinator {
     private let buildingsStore: BuildingsStore
     private let dispatcher: BuffDispatchPort
     private let classifier: BuffCategoryClassifier
-    private let bulk: BulkDispatcher
+    private let categoryRegistry: BuildingCategoryRegistry
+    private let bulk: BulkDispatching
     private let logger: Logger
 
     init(buffsStore: BuffsStore,
          buildingsStore: BuildingsStore,
          dispatcher: BuffDispatchPort,
          classifier: BuffCategoryClassifier = .default,
-         bulk: BulkDispatcher = .default,
+         categoryRegistry: BuildingCategoryRegistry = .default,
+         bulk: BulkDispatching = BulkDispatcher.default,
          logger: Logger = ConsoleLogger()) {
         self.buffsStore = buffsStore
         self.buildingsStore = buildingsStore
         self.dispatcher = dispatcher
         self.classifier = classifier
+        self.categoryRegistry = categoryRegistry
         self.bulk = bulk
         self.logger = logger
     }
@@ -39,7 +42,7 @@ final class BuffDispatchCoordinator {
     private static let fallbackDefaultBuff = "ProductivityBuffLvl300"
 
     var groups: [(category: BuildingCategory, buildings: [BuildingsStore.BuildingItem])] {
-        let snapshot = BuildingCategoryRegistry.categories
+        let snapshot = categoryRegistry.categories
             .compactMap { category -> (category: BuildingCategory, buildings: [BuildingsStore.BuildingItem])? in
                 let buildings = buildingsStore.buildings(matchingSkinBases: category.skinBases)
                 return buildings.isEmpty ? nil : (category, buildings)

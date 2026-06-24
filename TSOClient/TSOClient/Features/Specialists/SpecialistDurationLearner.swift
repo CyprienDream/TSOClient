@@ -25,14 +25,17 @@ final class SpecialistDurationLearner {
 
     private let store: KeyValueStore
     private let durationLogger: SpecialistDurationLogger
+    private let estimator: DurationEstimator
     private let persistKey: String
 
     init(store: KeyValueStore = UserDefaultsKeyValueStore(),
          logger: Logger = ConsoleLogger(),
          durationLogger: SpecialistDurationLogger? = nil,
+         estimator: DurationEstimator = RegistryDurationEstimator(),
          persistKey: String = "tsoLearnedDurations") {
         self.store = store
-        self.durationLogger = durationLogger ?? SpecialistDurationLogger(logger: logger)
+        self.durationLogger = durationLogger ?? SpecialistDurationLogger(logger: logger, estimator: estimator)
+        self.estimator = estimator
         self.persistKey = persistKey
         if let saved = store.dictionary(forKey: persistKey) as? [String: Int] {
             self.learnedDurations = saved
@@ -91,9 +94,7 @@ final class SpecialistDurationLearner {
                                      formatter: SpecialistDisplayFormatter,
                                      pfbActive: Bool,
                                      now: Date) {
-        // Non-explorer subtypes have no bonus in the registry — default to 100
-        // (no scaling) which keeps the current geologist/general behavior.
-        let bonus = ExplorerDurationRegistry.timeBonus[item.subTypeId] ?? 100
+        let bonus = estimator.timeBonus(subTypeId: item.subTypeId)
         if let ct = item.collectedTime {
             let realElapsedSec = Double(ct) / 1000.0 * 100.0 / Double(bonus)
             taskStartedAt[item.uid] = now.addingTimeInterval(-realElapsedSec)

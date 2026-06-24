@@ -85,10 +85,10 @@ final class SpecialistDispatchCoordinator {
 
     private let store: SpecialistsStore
     private let dispatcher: SpecialistDispatchPort
-    private let bulk: BulkDispatcher
+    private let bulk: BulkDispatching
     private let logger: Logger
-    private let defaults: UserDefaults
-    private let estimator: (SpecialistItem, TaskCode, Bool) -> TimeInterval?
+    private let defaults: KeyValueStore
+    private let estimator: DurationEstimator
     // Registered auto-loop strategies keyed by id. The runAuto* methods are
     // facades that look up by a known id; adding a new auto-loop kind means
     // registering a new strategy here, not adding more runAuto* methods.
@@ -96,14 +96,10 @@ final class SpecialistDispatchCoordinator {
 
     init(store: SpecialistsStore,
          dispatcher: SpecialistDispatchPort,
-         bulk: BulkDispatcher = .default,
+         bulk: BulkDispatching = BulkDispatcher.default,
          logger: Logger = ConsoleLogger(),
-         defaults: UserDefaults = .standard,
-         estimator: @escaping (SpecialistItem, TaskCode, Bool) -> TimeInterval? = { spec, code, pfb in
-             ExplorerDurationRegistry.estimate(
-                 task: code, subTypeId: spec.subTypeId,
-                 skills: spec.skills, pfbActive: pfb)
-         }) {
+         defaults: KeyValueStore = UserDefaultsKeyValueStore(),
+         estimator: DurationEstimator = RegistryDurationEstimator()) {
         self.store = store
         self.dispatcher = dispatcher
         self.bulk = bulk

@@ -9,6 +9,7 @@ struct AppEnvironment {
     let specialists: SpecialistsStore
     let buildings: BuildingsStore
     let buffs: BuffsStore
+    let executor: WKWebViewJSExecutor     // late-binding webView holder
     let sender: BridgeSender              // also conforms to OutboundDispatching
     let inbound: InboundDispatcher
     let specialistDispatch: SpecialistDispatchCoordinator
@@ -26,7 +27,9 @@ struct AppEnvironment {
         )
         self.buildings = BuildingsStore()
         self.buffs = BuffsStore(naming: naming)
-        let sender = BridgeSender(logger: logger)
+        let executor = WKWebViewJSExecutor(logger: logger)
+        self.executor = executor
+        let sender = BridgeSender(logger: logger, executor: executor)
         self.sender = sender
 
         let specialistDispatch = SpecialistDispatchCoordinator(

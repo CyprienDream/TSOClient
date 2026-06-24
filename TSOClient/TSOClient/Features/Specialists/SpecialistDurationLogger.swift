@@ -5,9 +5,12 @@ import Foundation
 // "track wall-clock busy/idle transitions"; this type owns presentation.
 struct SpecialistDurationLogger {
     let logger: Logger
+    let estimator: DurationEstimator
 
-    init(logger: Logger = ConsoleLogger()) {
+    init(logger: Logger = ConsoleLogger(),
+         estimator: DurationEstimator = RegistryDurationEstimator()) {
         self.logger = logger
+        self.estimator = estimator
     }
 
     static func logPrefix(for kind: SpecialistKind) -> String? {
@@ -27,7 +30,7 @@ struct SpecialistDurationLogger {
         let skillStr = item.skills.map { "\($0.id)/\($0.level)" }.joined(separator: ",")
         let realElapsedS = Double(ct) / 1000.0 * 100.0 / Double(bonus)
         let name = formatter.compactDisplayName(forPayloadItem: item)
-        if let predicted = ExplorerDurationRegistry.estimate(
+        if let predicted = estimator.estimate(
             task: code, subTypeId: item.subTypeId, skills: item.skills, pfbActive: pfbActive) {
             let remainingS = max(0, predicted - realElapsedS)
             logger.log("[\(prefix)] busy \"\(name)\" uid=\(item.uid) type=\(item.subTypeId) " +
@@ -55,7 +58,7 @@ struct SpecialistDurationLogger {
     func divergence(subTypeId: Int, actionType: Int, subTaskId: Int,
                     observedMs: Int, skills: [SpecialistSkill], pfbActive: Bool) {
         let code = TaskCode(actionType: actionType, subTaskID: subTaskId)
-        guard let predicted = ExplorerDurationRegistry.estimate(
+        guard let predicted = estimator.estimate(
             task: code, subTypeId: subTypeId, skills: skills, pfbActive: pfbActive) else { return }
         let observedSec = Double(observedMs) / 1000.0
         let delta = abs(predicted - observedSec) / observedSec

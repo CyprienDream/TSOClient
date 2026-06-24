@@ -84,17 +84,19 @@ enum ExplorerDurationRegistry {
         }
     }
 
-    private struct Loaded {
+    struct Loaded {
         let base:   [TaskCode: Int]
         let bonus:  [Int: Int]
         let skills: [Int: SkillEffect]
+
+        static let empty = Loaded(base: [:], bonus: [:], skills: [:])
     }
 
-    private static let loaded: Loaded = {
-        guard let url = Bundle.main.url(forResource: "explorer-durations", withExtension: "json"),
-              let data = try? Data(contentsOf: url) else {
-            ConsoleLogger().log("[ExplorerDurationRegistry] explorer-durations.json not found")
-            return Loaded(base: [:], bonus: [:], skills: [:])
+    static func load(loader: ResourceLoader = BundleResourceLoader(),
+                     logger: Logger = ConsoleLogger()) -> Loaded {
+        guard let data = loader.loadData(name: "explorer-durations", ext: "json") else {
+            logger.log("[ExplorerDurationRegistry] explorer-durations.json not found")
+            return .empty
         }
         do {
             let raw = try JSONDecoder().decode(Raw.self, from: data)
@@ -116,8 +118,11 @@ enum ExplorerDurationRegistry {
             }
             return Loaded(base: base, bonus: bonus, skills: skillMap)
         } catch {
-            ConsoleLogger().log("[ExplorerDurationRegistry] decode error: \(error)")
-            return Loaded(base: [:], bonus: [:], skills: [:])
+            logger.log("[ExplorerDurationRegistry] decode error: \(error)")
+            return .empty
         }
-    }()
+    }
+
+    // Production-default Loaded snapshot, materialised once from Bundle.main.
+    private static let loaded: Loaded = load()
 }

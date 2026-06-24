@@ -53,20 +53,29 @@ enum BuildingGroup: String, CaseIterable {
     }
 }
 
-enum BuildingCategoryRegistry {
-    static let categories: [BuildingCategory] = load()
+// Building-category table, loaded from building-categories.json via the
+// shared ResourceLoader seam so tests can substitute synthetic data
+// without touching Bundle.main. Production callers use the .default
+// instance; BuffDispatchCoordinator takes one via init.
+struct BuildingCategoryRegistry {
+    let categories: [BuildingCategory]
 
-    private static func load() -> [BuildingCategory] {
-        guard let url = Bundle.main.url(forResource: "building-categories", withExtension: "json"),
-              let data = try? Data(contentsOf: url) else {
-            ConsoleLogger().log("[BuildingCategoryRegistry] building-categories.json not found")
-            return []
+    static let empty = BuildingCategoryRegistry(categories: [])
+
+    static func load(loader: ResourceLoader = BundleResourceLoader(),
+                     logger: Logger = ConsoleLogger()) -> BuildingCategoryRegistry {
+        guard let data = loader.loadData(name: "building-categories", ext: "json") else {
+            logger.log("[BuildingCategoryRegistry] building-categories.json not found")
+            return .empty
         }
         do {
-            return try JSONDecoder().decode([BuildingCategory].self, from: data)
+            let cats = try JSONDecoder().decode([BuildingCategory].self, from: data)
+            return BuildingCategoryRegistry(categories: cats)
         } catch {
-            ConsoleLogger().log("[BuildingCategoryRegistry] decode error: \(error)")
-            return []
+            logger.log("[BuildingCategoryRegistry] decode error: \(error)")
+            return .empty
         }
     }
+
+    static let `default`: BuildingCategoryRegistry = load()
 }
