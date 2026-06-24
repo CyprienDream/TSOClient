@@ -1,0 +1,36 @@
+{
+  "" : {
+    "const-values" : "/Users/cyprieneckert/Desktop/TSOClient/TSOClient/build/TSOClient.build/Release/TSOClientTests.build/Objects-normal/arm64/TSOClientTests-primary.swiftconstvalues",
+    "dependencies" : "/Users/cyprieneckert/Desktop/TSOClient/TSOClient/build/TSOClient.build/Release/TSOClientTests.build/Objects-normal/arm64/TSOClientTests-primary.d",
+    "diagnostics" : "/Users/cyprieneckert/Desktop/TSOClient/TSOClient/build/TSOClient.build/Release/TSOClientTests.build/Objects-normal/arm64/TSOClientTests-primary.dia",
+    "emit-module-dependencies" : "/Users/cyprieneckert/Desktop/TSOClient/TSOClient/build/TSOClient.build/Release/TSOClientTests.build/Objects-normal/arm64/TSOClientTests-primary-emit-module.d",
+    "emit-module-diagnostics" : "/Users/cyprieneckert/Desktop/TSOClient/TSOClient/build/TSOClient.build/Release/TSOClientTests.build/Objects-normal/arm64/TSOClientTests-primary-emit-module.dia",
+    "pch" : "/Users/cyprieneckert/Desktop/TSOClient/TSOClient/build/TSOClient.build/Release/TSOClientTests.build/Objects-normal/arm64/TSOClientTests-primary-Bridging-header.pch",
+    "swift-dependencies" : "/Users/cyprieneckert/Desktop/TSOClient/TSOClient/build/TSOClient.build/Release/TSOClientTests.build/Objects-normal/arm64/TSOClientTests-primary.swiftdeps"
+  },
+  "/Users/cyprieneckert/Desktop/TSOClient/TSOClient/TSOClientTests/BridgeTests.swift" : {
+    "index-unit-output-path" : "/TSOClient.build/Release/TSOClientTests.build/Objects-normal/arm64/BridgeTests.o",
+    "llvm-bc" : "/Users/cyprieneckert/Desktop/TSOClient/TSOClient/build/TSOClient.build/Release/TSOClientTests.build/Objects-normal/arm64/BridgeTests.bc",
+    "object" : "/Users/cyprieneckert/Desktop/TSOClient/TSOClient/build/TSOClient.build/Release/TSOClientTests.build/Objects-normal/arm64/BridgeTests.o"
+  },
+  "/Users/cyprieneckert/Desktop/TSOClient/TSOClient/TSOClientTests/CoordinatorTests.swift" : {
+    "index-unit-output-path" : "/TSOClient.build/Release/TSOClientTests.build/Objects-normal/arm64/CoordinatorTests.o",
+    "llvm-bc" : "/Users/cyprieneckert/Desktop/TSOClient/TSOClient/build/TSOClient.build/Release/TSOClientTests.build/Objects-normal/arm64/CoordinatorTests.bc",
+    "object" : "/Users/cyprieneckert/Desktop/TSOClient/TSOClient/build/TSOClient.build/Release/TSOClientTests.build/Objects-normal/arm64/CoordinatorTests.o"
+  },
+  "/Users/cyprieneckert/Desktop/TSOClient/TSOClient/TSOClientTests/Mocks.swift" : {
+    "index-unit-output-path" : "/TSOClient.build/Release/TSOClientTests.build/Objects-normal/arm64/Mocks.o",
+    "llvm-bc" : "/Users/cyprieneckert/Desktop/TSOClient/TSOClient/build/TSOClient.build/Release/TSOClientTests.build/Objects-normal/arm64/Mocks.bc",
+    "object" : "/Users/cyprieneckert/Desktop/TSOClient/TSOClient/build/TSOClient.build/Release/TSOClientTests.build/Objects-normal/arm64/Mocks.o"
+  },
+  "/Users/cyprieneckert/Desktop/TSOClient/TSOClient/TSOClientTests/RegistryTests.swift" : {
+    "index-unit-output-path" : "/TSOClient.build/Release/TSOClientTests.build/Objects-normal/arm64/RegistryTests.o",
+    "llvm-bc" : "/Users/cyprieneckert/Desktop/TSOClient/TSOClient/build/TSOClient.build/Release/TSOClientTests.build/Objects-normal/arm64/RegistryTests.bc",
+    "object" : "/Users/cyprieneckert/Desktop/TSOClient/TSOClient/build/TSOClient.build/Release/TSOClientTests.build/Objects-normal/arm64/RegistryTests.o"
+  },
+  "/Users/cyprieneckert/Desktop/TSOClient/TSOClient/TSOClientTests/SpecialistLearnerTests.swift" : {
+    "index-unit-output-path" : "/TSOClient.build/Release/TSOClientTests.build/Objects-normal/arm64/SpecialistLearnerTests.o",
+    "llvm-bc" : "/Users/cyprieneckert/Desktop/TSOClient/TSOClient/build/TSOClient.build/Release/TSOClientTests.build/Objects-normal/arm64/SpecialistLearnerTests.bc",
+    "object" : "/Users/cyprieneckert/Desktop/TSOClient/TSOClient/build/TSOClient.build/Release/TSOClientTests.build/Objects-normal/arm64/SpecialistLearnerTests.o"
+  }
+}

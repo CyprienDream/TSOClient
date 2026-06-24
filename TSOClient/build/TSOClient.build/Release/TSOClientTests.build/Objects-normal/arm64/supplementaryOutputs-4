@@ -1,0 +1,12 @@
+{
+  "/Users/cyprieneckert/Desktop/TSOClient/TSOClient/TSOClientTests/BridgeTests.swift" : {
+    "abi-baseline-json" : "/Users/cyprieneckert/Desktop/TSOClient/TSOClient/build/TSOClient.build/Release/TSOClientTests.build/Objects-normal/arm64/TSOClientTests.abi.json",
+    "const-values" : "/Users/cyprieneckert/Desktop/TSOClient/TSOClient/build/TSOClient.build/Release/TSOClientTests.build/Objects-normal/arm64/TSOClientTests-primary.swiftconstvalues",
+    "dependencies" : "/Users/cyprieneckert/Desktop/TSOClient/TSOClient/build/TSOClient.build/Release/TSOClientTests.build/Objects-normal/arm64/TSOClientTests-primary.d",
+    "diagnostics" : "/Users/cyprieneckert/Desktop/TSOClient/TSOClient/build/TSOClient.build/Release/TSOClientTests.build/Objects-normal/arm64/TSOClientTests-primary.dia",
+    "objc-header" : "/Users/cyprieneckert/Desktop/TSOClient/TSOClient/build/TSOClient.build/Release/TSOClientTests.build/Objects-normal/arm64/TSOClientTests-Swift.h",
+    "swiftdoc" : "/Users/cyprieneckert/Desktop/TSOClient/TSOClient/build/TSOClient.build/Release/TSOClientTests.build/Objects-normal/arm64/TSOClientTests.swiftdoc",
+    "swiftmodule" : "/Users/cyprieneckert/Desktop/TSOClient/TSOClient/build/TSOClient.build/Release/TSOClientTests.build/Objects-normal/arm64/TSOClientTests.swiftmodule",
+    "swiftsourceinfo" : "/Users/cyprieneckert/Desktop/TSOClient/TSOClient/build/TSOClient.build/Release/TSOClientTests.build/Objects-normal/arm64/TSOClientTests.swiftsourceinfo"
+  }
+}

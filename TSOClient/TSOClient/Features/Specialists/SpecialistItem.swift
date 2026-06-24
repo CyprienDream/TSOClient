@@ -1,6 +1,6 @@
 import Foundation
 
-struct SpecialistItem: Identifiable {
+struct SpecialistItem: Identifiable, Equatable {
     let id: String          // "uid1:uid2"
     let uid1: Int
     let uid2: Int

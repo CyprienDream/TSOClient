@@ -32,25 +32,29 @@ struct BuffsPanel: View {
                 Divider()
                 ScrollView {
                     LazyVStack(alignment: .leading, spacing: 0) {
-                        ForEach(snapshot, id: \.category.id) { group in
-                            let sel = coordinator.selectedBuff[group.category.id] ?? ""
-                            BuildingGroupRow(
-                                categoryDisplayName: group.category.displayName,
-                                buildingsCount: group.buildings.count,
-                                buffedCount: group.buildings.reduce(0) { $0 + ($1.activeBuff != nil ? 1 : 0) },
-                                availableBuffs: buffs,
-                                buffsVersion: buffsVersion,
-                                selectedBuff: sel,
-                                onSelect: { newName in
-                                    coordinator.selectedBuff[group.category.id] = newName
-                                },
-                                onBuffAll: {
-                                    coordinator.buffAll(group: group.buildings, buffName: sel)
-                                }
-                            )
-                            .equatable()
-                            .padding(.horizontal, 12)
-                            Divider()
+                        ForEach(coordinator.groupedSnapshot, id: \.group) { section in
+                            SectionHeader(group: section.group, count: section.items.count)
+                            ForEach(section.items, id: \.category.id) { group in
+                                let sel = coordinator.selectedBuff[group.category.id] ?? ""
+                                BuildingGroupRow(
+                                    categoryDisplayName: group.category.displayName,
+                                    buildingsCount: group.buildings.count,
+                                    buffedCount: group.buildings.reduce(0) { $0 + ($1.activeBuff != nil ? 1 : 0) },
+                                    availableBuffs: buffs,
+                                    buffsVersion: buffsVersion,
+                                    selectedBuff: sel,
+                                    onSelect: { newName in
+                                        coordinator.selectedBuff[group.category.id] = newName
+                                    },
+                                    onBuffAll: {
+                                        coordinator.buffAll(group: group.buildings, buffName: sel)
+                                    }
+                                )
+                                .equatable()
+                                .padding(.horizontal, 12)
+                                .background(section.group.tint.opacity(0.05))
+                                Divider()
+                            }
                         }
                     }
                 }
@@ -82,8 +86,17 @@ struct BuffsPanel: View {
         let label = coordinator.masterBuff.isEmpty
             ? "— select buff —"
             : (buffs.first { $0.buffName == coordinator.masterBuff }?.displayLabel ?? coordinator.masterBuff)
-        let canBuffAll = !coordinator.masterBuff.isEmpty
-            && buffsStore.totalAmount(for: coordinator.masterBuff) > 0
+        // Master selection set → require inventory of that buff.
+        // Master empty → enabled if at least one visible group has a valid selection.
+        let canBuffAll: Bool = {
+            if !coordinator.masterBuff.isEmpty {
+                return buffsStore.totalAmount(for: coordinator.masterBuff) > 0
+            }
+            return snapshot.contains { group in
+                let raw = coordinator.selectedBuff[group.category.id] ?? ""
+                return !raw.isEmpty && buffsStore.totalAmount(for: raw) > 0
+            }
+        }()
         let totalBuildings = snapshot.reduce(0) { $0 + $1.buildings.count }
         return VStack(alignment: .leading, spacing: 4) {
             HStack {
@@ -110,7 +123,11 @@ struct BuffsPanel: View {
                 }
 
                 Button("Buff all") {
-                    coordinator.buffAllGroups(snapshot: snapshot, buffName: coordinator.masterBuff)
+                    if coordinator.masterBuff.isEmpty {
+                        coordinator.buffAllGroupsUsingPerGroupSelection(snapshot: snapshot)
+                    } else {
+                        coordinator.buffAllGroups(snapshot: snapshot, buffName: coordinator.masterBuff)
+                    }
                 }
                 .buttonStyle(.borderedProminent)
                 .controlSize(.small)
@@ -119,6 +136,31 @@ struct BuffsPanel: View {
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 8)
+    }
+}
+
+// Small tinted bar that announces each building-group bucket.
+private struct SectionHeader: View {
+    let group: BuildingGroup
+    let count: Int
+
+    var body: some View {
+        HStack(spacing: 6) {
+            Circle()
+                .fill(group.tint)
+                .frame(width: 8, height: 8)
+            Text(group.displayName.uppercased())
+                .font(.caption2).bold()
+                .foregroundStyle(group.tint)
+                .kerning(0.5)
+            Spacer()
+            Text("\(count)")
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 6)
+        .background(group.tint.opacity(0.12))
     }
 }
 

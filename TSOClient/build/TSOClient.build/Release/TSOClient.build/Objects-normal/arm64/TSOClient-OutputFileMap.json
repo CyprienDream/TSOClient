@@ -1,0 +1,216 @@
+{
+  "" : {
+    "const-values" : "/Users/cyprieneckert/Desktop/TSOClient/TSOClient/build/TSOClient.build/Release/TSOClient.build/Objects-normal/arm64/TSOClient-primary.swiftconstvalues",
+    "dependencies" : "/Users/cyprieneckert/Desktop/TSOClient/TSOClient/build/TSOClient.build/Release/TSOClient.build/Objects-normal/arm64/TSOClient-primary.d",
+    "diagnostics" : "/Users/cyprieneckert/Desktop/TSOClient/TSOClient/build/TSOClient.build/Release/TSOClient.build/Objects-normal/arm64/TSOClient-primary.dia",
+    "emit-module-dependencies" : "/Users/cyprieneckert/Desktop/TSOClient/TSOClient/build/TSOClient.build/Release/TSOClient.build/Objects-normal/arm64/TSOClient-primary-emit-module.d",
+    "emit-module-diagnostics" : "/Users/cyprieneckert/Desktop/TSOClient/TSOClient/build/TSOClient.build/Release/TSOClient.build/Objects-normal/arm64/TSOClient-primary-emit-module.dia",
+    "pch" : "/Users/cyprieneckert/Desktop/TSOClient/TSOClient/build/TSOClient.build/Release/TSOClient.build/Objects-normal/arm64/TSOClient-primary-Bridging-header.pch",
+    "swift-dependencies" : "/Users/cyprieneckert/Desktop/TSOClient/TSOClient/build/TSOClient.build/Release/TSOClient.build/Objects-normal/arm64/TSOClient-primary.swiftdeps"
+  },
+  "/Users/cyprieneckert/Desktop/TSOClient/TSOClient/TSOClient/App/AppEnvironment.swift" : {
+    "index-unit-output-path" : "/TSOClient.build/Release/TSOClient.build/Objects-normal/arm64/AppEnvironment.o",
+    "llvm-bc" : "/Users/cyprieneckert/Desktop/TSOClient/TSOClient/build/TSOClient.build/Release/TSOClient.build/Objects-normal/arm64/AppEnvironment.bc",
+    "object" : "/Users/cyprieneckert/Desktop/TSOClient/TSOClient/build/TSOClient.build/Release/TSOClient.build/Objects-normal/arm64/AppEnvironment.o"
+  },
+  "/Users/cyprieneckert/Desktop/TSOClient/TSOClient/TSOClient/App/ContentView.swift" : {
+    "index-unit-output-path" : "/TSOClient.build/Release/TSOClient.build/Objects-normal/arm64/ContentView.o",
+    "llvm-bc" : "/Users/cyprieneckert/Desktop/TSOClient/TSOClient/build/TSOClient.build/Release/TSOClient.build/Objects-normal/arm64/ContentView.bc",
+    "object" : "/Users/cyprieneckert/Desktop/TSOClient/TSOClient/build/TSOClient.build/Release/TSOClient.build/Objects-normal/arm64/ContentView.o"
+  },
+  "/Users/cyprieneckert/Desktop/TSOClient/TSOClient/TSOClient/Bridge/BridgeSender.swift" : {
+    "index-unit-output-path" : "/TSOClient.build/Release/TSOClient.build/Objects-normal/arm64/BridgeSender.o",
+    "llvm-bc" : "/Users/cyprieneckert/Desktop/TSOClient/TSOClient/build/TSOClient.build/Release/TSOClient.build/Objects-normal/arm64/BridgeSender.bc",
+    "object" : "/Users/cyprieneckert/Desktop/TSOClient/TSOClient/build/TSOClient.build/Release/TSOClient.build/Objects-normal/arm64/BridgeSender.o"
+  },
+  "/Users/cyprieneckert/Desktop/TSOClient/TSOClient/TSOClient/Bridge/InboundDispatcher.swift" : {
+    "index-unit-output-path" : "/TSOClient.build/Release/TSOClient.build/Objects-normal/arm64/InboundDispatcher.o",
+    "llvm-bc" : "/Users/cyprieneckert/Desktop/TSOClient/TSOClient/build/TSOClient.build/Release/TSOClient.build/Objects-normal/arm64/InboundDispatcher.bc",
+    "object" : "/Users/cyprieneckert/Desktop/TSOClient/TSOClient/build/TSOClient.build/Release/TSOClient.build/Objects-normal/arm64/InboundDispatcher.o"
+  },
+  "/Users/cyprieneckert/Desktop/TSOClient/TSOClient/TSOClient/Bridge/InboundHandlers.swift" : {
+    "index-unit-output-path" : "/TSOClient.build/Release/TSOClient.build/Objects-normal/arm64/InboundHandlers.o",
+    "llvm-bc" : "/Users/cyprieneckert/Desktop/TSOClient/TSOClient/build/TSOClient.build/Release/TSOClient.build/Objects-normal/arm64/InboundHandlers.bc",
+    "object" : "/Users/cyprieneckert/Desktop/TSOClient/TSOClient/build/TSOClient.build/Release/TSOClient.build/Objects-normal/arm64/InboundHandlers.o"
+  },
+  "/Users/cyprieneckert/Desktop/TSOClient/TSOClient/TSOClient/Bridge/InboundMessage.swift" : {
+    "index-unit-output-path" : "/TSOClient.build/Release/TSOClient.build/Objects-normal/arm64/InboundMessage.o",
+    "llvm-bc" : "/Users/cyprieneckert/Desktop/TSOClient/TSOClient/build/TSOClient.build/Release/TSOClient.build/Objects-normal/arm64/InboundMessage.bc",
+    "object" : "/Users/cyprieneckert/Desktop/TSOClient/TSOClient/build/TSOClient.build/Release/TSOClient.build/Objects-normal/arm64/InboundMessage.o"
+  },
+  "/Users/cyprieneckert/Desktop/TSOClient/TSOClient/TSOClient/Bridge/InboundMessageHandler.swift" : {
+    "index-unit-output-path" : "/TSOClient.build/Release/TSOClient.build/Objects-normal/arm64/InboundMessageHandler.o",
+    "llvm-bc" : "/Users/cyprieneckert/Desktop/TSOClient/TSOClient/build/TSOClient.build/Release/TSOClient.build/Objects-normal/arm64/InboundMessageHandler.bc",
+    "object" : "/Users/cyprieneckert/Desktop/TSOClient/TSOClient/build/TSOClient.build/Release/TSOClient.build/Objects-normal/arm64/InboundMessageHandler.o"
+  },
+  "/Users/cyprieneckert/Desktop/TSOClient/TSOClient/TSOClient/Bridge/OutboundDispatching.swift" : {
+    "index-unit-output-path" : "/TSOClient.build/Release/TSOClient.build/Objects-normal/arm64/OutboundDispatching.o",
+    "llvm-bc" : "/Users/cyprieneckert/Desktop/TSOClient/TSOClient/build/TSOClient.build/Release/TSOClient.build/Objects-normal/arm64/OutboundDispatching.bc",
+    "object" : "/Users/cyprieneckert/Desktop/TSOClient/TSOClient/build/TSOClient.build/Release/TSOClient.build/Objects-normal/arm64/OutboundDispatching.o"
+  },
+  "/Users/cyprieneckert/Desktop/TSOClient/TSOClient/TSOClient/Bridge/OutboundMessage.swift" : {
+    "index-unit-output-path" : "/TSOClient.build/Release/TSOClient.build/Objects-normal/arm64/OutboundMessage.o",
+    "llvm-bc" : "/Users/cyprieneckert/Desktop/TSOClient/TSOClient/build/TSOClient.build/Release/TSOClient.build/Objects-normal/arm64/OutboundMessage.bc",
+    "object" : "/Users/cyprieneckert/Desktop/TSOClient/TSOClient/build/TSOClient.build/Release/TSOClient.build/Objects-normal/arm64/OutboundMessage.o"
+  },
+  "/Users/cyprieneckert/Desktop/TSOClient/TSOClient/TSOClient/Bridge/WireCommand.swift" : {
+    "index-unit-output-path" : "/TSOClient.build/Release/TSOClient.build/Objects-normal/arm64/WireCommand.o",
+    "llvm-bc" : "/Users/cyprieneckert/Desktop/TSOClient/TSOClient/build/TSOClient.build/Release/TSOClient.build/Objects-normal/arm64/WireCommand.bc",
+    "object" : "/Users/cyprieneckert/Desktop/TSOClient/TSOClient/build/TSOClient.build/Release/TSOClient.build/Objects-normal/arm64/WireCommand.o"
+  },
+  "/Users/cyprieneckert/Desktop/TSOClient/TSOClient/TSOClient/Features/Buffs/BuffCategoryClassifier.swift" : {
+    "index-unit-output-path" : "/TSOClient.build/Release/TSOClient.build/Objects-normal/arm64/BuffCategoryClassifier.o",
+    "llvm-bc" : "/Users/cyprieneckert/Desktop/TSOClient/TSOClient/build/TSOClient.build/Release/TSOClient.build/Objects-normal/arm64/BuffCategoryClassifier.bc",
+    "object" : "/Users/cyprieneckert/Desktop/TSOClient/TSOClient/build/TSOClient.build/Release/TSOClient.build/Objects-normal/arm64/BuffCategoryClassifier.o"
+  },
+  "/Users/cyprieneckert/Desktop/TSOClient/TSOClient/TSOClient/Features/Buffs/BuffDispatchCoordinator.swift" : {
+    "index-unit-output-path" : "/TSOClient.build/Release/TSOClient.build/Objects-normal/arm64/BuffDispatchCoordinator.o",
+    "llvm-bc" : "/Users/cyprieneckert/Desktop/TSOClient/TSOClient/build/TSOClient.build/Release/TSOClient.build/Objects-normal/arm64/BuffDispatchCoordinator.bc",
+    "object" : "/Users/cyprieneckert/Desktop/TSOClient/TSOClient/build/TSOClient.build/Release/TSOClient.build/Objects-normal/arm64/BuffDispatchCoordinator.o"
+  },
+  "/Users/cyprieneckert/Desktop/TSOClient/TSOClient/TSOClient/Features/Buffs/BuffsPanel.swift" : {
+    "index-unit-output-path" : "/TSOClient.build/Release/TSOClient.build/Objects-normal/arm64/BuffsPanel.o",
+    "llvm-bc" : "/Users/cyprieneckert/Desktop/TSOClient/TSOClient/build/TSOClient.build/Release/TSOClient.build/Objects-normal/arm64/BuffsPanel.bc",
+    "object" : "/Users/cyprieneckert/Desktop/TSOClient/TSOClient/build/TSOClient.build/Release/TSOClient.build/Objects-normal/arm64/BuffsPanel.o"
+  },
+  "/Users/cyprieneckert/Desktop/TSOClient/TSOClient/TSOClient/Features/Buffs/BuffsStore.swift" : {
+    "index-unit-output-path" : "/TSOClient.build/Release/TSOClient.build/Objects-normal/arm64/BuffsStore.o",
+    "llvm-bc" : "/Users/cyprieneckert/Desktop/TSOClient/TSOClient/build/TSOClient.build/Release/TSOClient.build/Objects-normal/arm64/BuffsStore.bc",
+    "object" : "/Users/cyprieneckert/Desktop/TSOClient/TSOClient/build/TSOClient.build/Release/TSOClient.build/Objects-normal/arm64/BuffsStore.o"
+  },
+  "/Users/cyprieneckert/Desktop/TSOClient/TSOClient/TSOClient/Features/Buffs/BuildingCategoryRegistry.swift" : {
+    "index-unit-output-path" : "/TSOClient.build/Release/TSOClient.build/Objects-normal/arm64/BuildingCategoryRegistry.o",
+    "llvm-bc" : "/Users/cyprieneckert/Desktop/TSOClient/TSOClient/build/TSOClient.build/Release/TSOClient.build/Objects-normal/arm64/BuildingCategoryRegistry.bc",
+    "object" : "/Users/cyprieneckert/Desktop/TSOClient/TSOClient/build/TSOClient.build/Release/TSOClient.build/Objects-normal/arm64/BuildingCategoryRegistry.o"
+  },
+  "/Users/cyprieneckert/Desktop/TSOClient/TSOClient/TSOClient/Features/Buffs/BuildingsStore.swift" : {
+    "index-unit-output-path" : "/TSOClient.build/Release/TSOClient.build/Objects-normal/arm64/BuildingsStore.o",
+    "llvm-bc" : "/Users/cyprieneckert/Desktop/TSOClient/TSOClient/build/TSOClient.build/Release/TSOClient.build/Objects-normal/arm64/BuildingsStore.bc",
+    "object" : "/Users/cyprieneckert/Desktop/TSOClient/TSOClient/build/TSOClient.build/Release/TSOClient.build/Objects-normal/arm64/BuildingsStore.o"
+  },
+  "/Users/cyprieneckert/Desktop/TSOClient/TSOClient/TSOClient/Features/Collectibles/CollectiblesStore.swift" : {
+    "index-unit-output-path" : "/TSOClient.build/Release/TSOClient.build/Objects-normal/arm64/CollectiblesStore.o",
+    "llvm-bc" : "/Users/cyprieneckert/Desktop/TSOClient/TSOClient/build/TSOClient.build/Release/TSOClient.build/Objects-normal/arm64/CollectiblesStore.bc",
+    "object" : "/Users/cyprieneckert/Desktop/TSOClient/TSOClient/build/TSOClient.build/Release/TSOClient.build/Objects-normal/arm64/CollectiblesStore.o"
+  },
+  "/Users/cyprieneckert/Desktop/TSOClient/TSOClient/TSOClient/Features/Specialists/ExplorerDurationRegistry.swift" : {
+    "index-unit-output-path" : "/TSOClient.build/Release/TSOClient.build/Objects-normal/arm64/ExplorerDurationRegistry.o",
+    "llvm-bc" : "/Users/cyprieneckert/Desktop/TSOClient/TSOClient/build/TSOClient.build/Release/TSOClient.build/Objects-normal/arm64/ExplorerDurationRegistry.bc",
+    "object" : "/Users/cyprieneckert/Desktop/TSOClient/TSOClient/build/TSOClient.build/Release/TSOClient.build/Objects-normal/arm64/ExplorerDurationRegistry.o"
+  },
+  "/Users/cyprieneckert/Desktop/TSOClient/TSOClient/TSOClient/Features/Specialists/SpecialistDispatchCoordinator.swift" : {
+    "index-unit-output-path" : "/TSOClient.build/Release/TSOClient.build/Objects-normal/arm64/SpecialistDispatchCoordinator.o",
+    "llvm-bc" : "/Users/cyprieneckert/Desktop/TSOClient/TSOClient/build/TSOClient.build/Release/TSOClient.build/Objects-normal/arm64/SpecialistDispatchCoordinator.bc",
+    "object" : "/Users/cyprieneckert/Desktop/TSOClient/TSOClient/build/TSOClient.build/Release/TSOClient.build/Objects-normal/arm64/SpecialistDispatchCoordinator.o"
+  },
+  "/Users/cyprieneckert/Desktop/TSOClient/TSOClient/TSOClient/Features/Specialists/SpecialistDisplayFormatter.swift" : {
+    "index-unit-output-path" : "/TSOClient.build/Release/TSOClient.build/Objects-normal/arm64/SpecialistDisplayFormatter.o",
+    "llvm-bc" : "/Users/cyprieneckert/Desktop/TSOClient/TSOClient/build/TSOClient.build/Release/TSOClient.build/Objects-normal/arm64/SpecialistDisplayFormatter.bc",
+    "object" : "/Users/cyprieneckert/Desktop/TSOClient/TSOClient/build/TSOClient.build/Release/TSOClient.build/Objects-normal/arm64/SpecialistDisplayFormatter.o"
+  },
+  "/Users/cyprieneckert/Desktop/TSOClient/TSOClient/TSOClient/Features/Specialists/SpecialistDurationLearner.swift" : {
+    "index-unit-output-path" : "/TSOClient.build/Release/TSOClient.build/Objects-normal/arm64/SpecialistDurationLearner.o",
+    "llvm-bc" : "/Users/cyprieneckert/Desktop/TSOClient/TSOClient/build/TSOClient.build/Release/TSOClient.build/Objects-normal/arm64/SpecialistDurationLearner.bc",
+    "object" : "/Users/cyprieneckert/Desktop/TSOClient/TSOClient/build/TSOClient.build/Release/TSOClient.build/Objects-normal/arm64/SpecialistDurationLearner.o"
+  },
+  "/Users/cyprieneckert/Desktop/TSOClient/TSOClient/TSOClient/Features/Specialists/SpecialistItem.swift" : {
+    "index-unit-output-path" : "/TSOClient.build/Release/TSOClient.build/Objects-normal/arm64/SpecialistItem.o",
+    "llvm-bc" : "/Users/cyprieneckert/Desktop/TSOClient/TSOClient/build/TSOClient.build/Release/TSOClient.build/Objects-normal/arm64/SpecialistItem.bc",
+    "object" : "/Users/cyprieneckert/Desktop/TSOClient/TSOClient/build/TSOClient.build/Release/TSOClient.build/Objects-normal/arm64/SpecialistItem.o"
+  },
+  "/Users/cyprieneckert/Desktop/TSOClient/TSOClient/TSOClient/Features/Specialists/SpecialistKind.swift" : {
+    "index-unit-output-path" : "/TSOClient.build/Release/TSOClient.build/Objects-normal/arm64/SpecialistKind.o",
+    "llvm-bc" : "/Users/cyprieneckert/Desktop/TSOClient/TSOClient/build/TSOClient.build/Release/TSOClient.build/Objects-normal/arm64/SpecialistKind.bc",
+    "object" : "/Users/cyprieneckert/Desktop/TSOClient/TSOClient/build/TSOClient.build/Release/TSOClient.build/Objects-normal/arm64/SpecialistKind.o"
+  },
+  "/Users/cyprieneckert/Desktop/TSOClient/TSOClient/TSOClient/Features/Specialists/SpecialistRow.swift" : {
+    "index-unit-output-path" : "/TSOClient.build/Release/TSOClient.build/Objects-normal/arm64/SpecialistRow.o",
+    "llvm-bc" : "/Users/cyprieneckert/Desktop/TSOClient/TSOClient/build/TSOClient.build/Release/TSOClient.build/Objects-normal/arm64/SpecialistRow.bc",
+    "object" : "/Users/cyprieneckert/Desktop/TSOClient/TSOClient/build/TSOClient.build/Release/TSOClient.build/Objects-normal/arm64/SpecialistRow.o"
+  },
+  "/Users/cyprieneckert/Desktop/TSOClient/TSOClient/TSOClient/Features/Specialists/SpecialistTaskAvailability.swift" : {
+    "index-unit-output-path" : "/TSOClient.build/Release/TSOClient.build/Objects-normal/arm64/SpecialistTaskAvailability.o",
+    "llvm-bc" : "/Users/cyprieneckert/Desktop/TSOClient/TSOClient/build/TSOClient.build/Release/TSOClient.build/Objects-normal/arm64/SpecialistTaskAvailability.bc",
+    "object" : "/Users/cyprieneckert/Desktop/TSOClient/TSOClient/build/TSOClient.build/Release/TSOClient.build/Objects-normal/arm64/SpecialistTaskAvailability.o"
+  },
+  "/Users/cyprieneckert/Desktop/TSOClient/TSOClient/TSOClient/Features/Specialists/SpecialistTasks.swift" : {
+    "index-unit-output-path" : "/TSOClient.build/Release/TSOClient.build/Objects-normal/arm64/SpecialistTasks.o",
+    "llvm-bc" : "/Users/cyprieneckert/Desktop/TSOClient/TSOClient/build/TSOClient.build/Release/TSOClient.build/Objects-normal/arm64/SpecialistTasks.bc",
+    "object" : "/Users/cyprieneckert/Desktop/TSOClient/TSOClient/build/TSOClient.build/Release/TSOClient.build/Objects-normal/arm64/SpecialistTasks.o"
+  },
+  "/Users/cyprieneckert/Desktop/TSOClient/TSOClient/TSOClient/Features/Specialists/SpecialistsPanel.swift" : {
+    "index-unit-output-path" : "/TSOClient.build/Release/TSOClient.build/Objects-normal/arm64/SpecialistsPanel.o",
+    "llvm-bc" : "/Users/cyprieneckert/Desktop/TSOClient/TSOClient/build/TSOClient.build/Release/TSOClient.build/Objects-normal/arm64/SpecialistsPanel.bc",
+    "object" : "/Users/cyprieneckert/Desktop/TSOClient/TSOClient/build/TSOClient.build/Release/TSOClient.build/Objects-normal/arm64/SpecialistsPanel.o"
+  },
+  "/Users/cyprieneckert/Desktop/TSOClient/TSOClient/TSOClient/Features/Specialists/SpecialistsStore.swift" : {
+    "index-unit-output-path" : "/TSOClient.build/Release/TSOClient.build/Objects-normal/arm64/SpecialistsStore.o",
+    "llvm-bc" : "/Users/cyprieneckert/Desktop/TSOClient/TSOClient/build/TSOClient.build/Release/TSOClient.build/Objects-normal/arm64/SpecialistsStore.bc",
+    "object" : "/Users/cyprieneckert/Desktop/TSOClient/TSOClient/build/TSOClient.build/Release/TSOClient.build/Objects-normal/arm64/SpecialistsStore.o"
+  },
+  "/Users/cyprieneckert/Desktop/TSOClient/TSOClient/TSOClient/TSOClientApp.swift" : {
+    "index-unit-output-path" : "/TSOClient.build/Release/TSOClient.build/Objects-normal/arm64/TSOClientApp.o",
+    "llvm-bc" : "/Users/cyprieneckert/Desktop/TSOClient/TSOClient/build/TSOClient.build/Release/TSOClient.build/Objects-normal/arm64/TSOClientApp.bc",
+    "object" : "/Users/cyprieneckert/Desktop/TSOClient/TSOClient/build/TSOClient.build/Release/TSOClient.build/Objects-normal/arm64/TSOClientApp.o"
+  },
+  "/Users/cyprieneckert/Desktop/TSOClient/TSOClient/TSOClient/Utilities/BulkDispatcher.swift" : {
+    "index-unit-output-path" : "/TSOClient.build/Release/TSOClient.build/Objects-normal/arm64/BulkDispatcher.o",
+    "llvm-bc" : "/Users/cyprieneckert/Desktop/TSOClient/TSOClient/build/TSOClient.build/Release/TSOClient.build/Objects-normal/arm64/BulkDispatcher.bc",
+    "object" : "/Users/cyprieneckert/Desktop/TSOClient/TSOClient/build/TSOClient.build/Release/TSOClient.build/Objects-normal/arm64/BulkDispatcher.o"
+  },
+  "/Users/cyprieneckert/Desktop/TSOClient/TSOClient/TSOClient/Utilities/DurationFormatter.swift" : {
+    "index-unit-output-path" : "/TSOClient.build/Release/TSOClient.build/Objects-normal/arm64/DurationFormatter.o",
+    "llvm-bc" : "/Users/cyprieneckert/Desktop/TSOClient/TSOClient/build/TSOClient.build/Release/TSOClient.build/Objects-normal/arm64/DurationFormatter.bc",
+    "object" : "/Users/cyprieneckert/Desktop/TSOClient/TSOClient/build/TSOClient.build/Release/TSOClient.build/Objects-normal/arm64/DurationFormatter.o"
+  },
+  "/Users/cyprieneckert/Desktop/TSOClient/TSOClient/TSOClient/Utilities/KeyValueStore.swift" : {
+    "index-unit-output-path" : "/TSOClient.build/Release/TSOClient.build/Objects-normal/arm64/KeyValueStore.o",
+    "llvm-bc" : "/Users/cyprieneckert/Desktop/TSOClient/TSOClient/build/TSOClient.build/Release/TSOClient.build/Objects-normal/arm64/KeyValueStore.bc",
+    "object" : "/Users/cyprieneckert/Desktop/TSOClient/TSOClient/build/TSOClient.build/Release/TSOClient.build/Objects-normal/arm64/KeyValueStore.o"
+  },
+  "/Users/cyprieneckert/Desktop/TSOClient/TSOClient/TSOClient/Utilities/Logger.swift" : {
+    "index-unit-output-path" : "/TSOClient.build/Release/TSOClient.build/Objects-normal/arm64/Logger.o",
+    "llvm-bc" : "/Users/cyprieneckert/Desktop/TSOClient/TSOClient/build/TSOClient.build/Release/TSOClient.build/Objects-normal/arm64/Logger.bc",
+    "object" : "/Users/cyprieneckert/Desktop/TSOClient/TSOClient/build/TSOClient.build/Release/TSOClient.build/Objects-normal/arm64/Logger.o"
+  },
+  "/Users/cyprieneckert/Desktop/TSOClient/TSOClient/TSOClient/Utilities/NamingRegistry.swift" : {
+    "index-unit-output-path" : "/TSOClient.build/Release/TSOClient.build/Objects-normal/arm64/NamingRegistry.o",
+    "llvm-bc" : "/Users/cyprieneckert/Desktop/TSOClient/TSOClient/build/TSOClient.build/Release/TSOClient.build/Objects-normal/arm64/NamingRegistry.bc",
+    "object" : "/Users/cyprieneckert/Desktop/TSOClient/TSOClient/build/TSOClient.build/Release/TSOClient.build/Objects-normal/arm64/NamingRegistry.o"
+  },
+  "/Users/cyprieneckert/Desktop/TSOClient/TSOClient/TSOClient/Utilities/ResourceLoading.swift" : {
+    "index-unit-output-path" : "/TSOClient.build/Release/TSOClient.build/Objects-normal/arm64/ResourceLoading.o",
+    "llvm-bc" : "/Users/cyprieneckert/Desktop/TSOClient/TSOClient/build/TSOClient.build/Release/TSOClient.build/Objects-normal/arm64/ResourceLoading.bc",
+    "object" : "/Users/cyprieneckert/Desktop/TSOClient/TSOClient/build/TSOClient.build/Release/TSOClient.build/Objects-normal/arm64/ResourceLoading.o"
+  },
+  "/Users/cyprieneckert/Desktop/TSOClient/TSOClient/TSOClient/Utilities/SleepInhibitor.swift" : {
+    "index-unit-output-path" : "/TSOClient.build/Release/TSOClient.build/Objects-normal/arm64/SleepInhibitor.o",
+    "llvm-bc" : "/Users/cyprieneckert/Desktop/TSOClient/TSOClient/build/TSOClient.build/Release/TSOClient.build/Objects-normal/arm64/SleepInhibitor.bc",
+    "object" : "/Users/cyprieneckert/Desktop/TSOClient/TSOClient/build/TSOClient.build/Release/TSOClient.build/Objects-normal/arm64/SleepInhibitor.o"
+  },
+  "/Users/cyprieneckert/Desktop/TSOClient/TSOClient/TSOClient/Utilities/String+CamelCase.swift" : {
+    "index-unit-output-path" : "/TSOClient.build/Release/TSOClient.build/Objects-normal/arm64/String+CamelCase.o",
+    "llvm-bc" : "/Users/cyprieneckert/Desktop/TSOClient/TSOClient/build/TSOClient.build/Release/TSOClient.build/Objects-normal/arm64/String+CamelCase.bc",
+    "object" : "/Users/cyprieneckert/Desktop/TSOClient/TSOClient/build/TSOClient.build/Release/TSOClient.build/Objects-normal/arm64/String+CamelCase.o"
+  },
+  "/Users/cyprieneckert/Desktop/TSOClient/TSOClient/TSOClient/WebView/JSInjection.swift" : {
+    "index-unit-output-path" : "/TSOClient.build/Release/TSOClient.build/Objects-normal/arm64/JSInjection.o",
+    "llvm-bc" : "/Users/cyprieneckert/Desktop/TSOClient/TSOClient/build/TSOClient.build/Release/TSOClient.build/Objects-normal/arm64/JSInjection.bc",
+    "object" : "/Users/cyprieneckert/Desktop/TSOClient/TSOClient/build/TSOClient.build/Release/TSOClient.build/Objects-normal/arm64/JSInjection.o"
+  },
+  "/Users/cyprieneckert/Desktop/TSOClient/TSOClient/TSOClient/WebView/WebView.swift" : {
+    "index-unit-output-path" : "/TSOClient.build/Release/TSOClient.build/Objects-normal/arm64/WebView.o",
+    "llvm-bc" : "/Users/cyprieneckert/Desktop/TSOClient/TSOClient/build/TSOClient.build/Release/TSOClient.build/Objects-normal/arm64/WebView.bc",
+    "object" : "/Users/cyprieneckert/Desktop/TSOClient/TSOClient/build/TSOClient.build/Release/TSOClient.build/Objects-normal/arm64/WebView.o"
+  },
+  "/Users/cyprieneckert/Desktop/TSOClient/TSOClient/TSOClient/WebView/WebViewCoordinator.swift" : {
+    "index-unit-output-path" : "/TSOClient.build/Release/TSOClient.build/Objects-normal/arm64/WebViewCoordinator.o",
+    "llvm-bc" : "/Users/cyprieneckert/Desktop/TSOClient/TSOClient/build/TSOClient.build/Release/TSOClient.build/Objects-normal/arm64/WebViewCoordinator.bc",
+    "object" : "/Users/cyprieneckert/Desktop/TSOClient/TSOClient/build/TSOClient.build/Release/TSOClient.build/Objects-normal/arm64/WebViewCoordinator.o"
+  },
+  "/Users/cyprieneckert/Desktop/TSOClient/TSOClient/build/TSOClient.build/Release/TSOClient.build/DerivedSources/GeneratedAssetSymbols.swift" : {
+    "index-unit-output-path" : "/TSOClient.build/Release/TSOClient.build/Objects-normal/arm64/GeneratedAssetSymbols.o",
+    "llvm-bc" : "/Users/cyprieneckert/Desktop/TSOClient/TSOClient/build/TSOClient.build/Release/TSOClient.build/Objects-normal/arm64/GeneratedAssetSymbols.bc",
+    "object" : "/Users/cyprieneckert/Desktop/TSOClient/TSOClient/build/TSOClient.build/Release/TSOClient.build/Objects-normal/arm64/GeneratedAssetSymbols.o"
+  }
+}

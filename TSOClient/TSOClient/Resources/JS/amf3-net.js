@@ -33,7 +33,7 @@
                         var call = bodyArr[k];
                         if (!call || !call.__class || call.__class.indexOf('dServerCall') < 0) continue;
                         var action = call.data;
-                        webkit.messageHandlers.logger.postMessage(
+                        window._tsoDiagLog(
                             '[AMF3:out:' + channel + '] callType=' + call.type +
                             ' zoneID=' + call.zoneID +
                             ' actionType=' + (action && action.type) +
@@ -119,7 +119,7 @@
         if (isPost && init.body) {
             // Capture all POSTs — buff and other actions may use different URLs.
             captureOutboundBody(init.body, 'fetch');
-            webkit.messageHandlers.logger.postMessage('[AMF3:out:url] POST ' + url.slice(0, 120));
+            window._tsoDiagLog('[AMF3:out:url] POST ' + url.slice(0, 120));
         }
         // Always update realm URL so zone-shard changes are picked up automatically.
         if (url.includes('GameServer/amf')) {
@@ -131,9 +131,13 @@
 
         return origFetch.apply(this, arguments).then(function(response) {
             var ct = response.headers ? (response.headers.get('content-type') || '') : '';
-            var wantAMF = url.includes('GameServer') ||
-                          ct.includes('amf') ||
-                          ct.includes('octet-stream');
+            // Narrow the AMF trigger: only the GameServer/amf endpoint plus
+            // explicit "amf" content-types qualify. The previous filter caught
+            // any URL with "GameServer" and any "octet-stream" response, which
+            // forced response.clone() + arrayBuffer() materialization on lots
+            // of unrelated assets — measurable memory churn over a long
+            // session.
+            var wantAMF = url.indexOf('GameServer/amf') >= 0 || ct.indexOf('amf') >= 0;
             if (wantAMF) {
                 response.clone().arrayBuffer().then(function(buf) {
                     if (buf.byteLength > 3) scanner.analyzeAMFBuffer(buf, 'fetch');
@@ -185,12 +189,10 @@
         // Capture all POSTs — buff and other actions may use different URLs.
         if (xhr._tsoMethod === 'POST' && body) {
             captureOutboundBody(body, 'xhr');
-            webkit.messageHandlers.logger.postMessage('[AMF3:out:url] XHR POST ' + (xhr._tsoUrl || '?').slice(0, 120));
+            window._tsoDiagLog('[AMF3:out:url] XHR POST ' + (xhr._tsoUrl || '?').slice(0, 120));
         }
-        var wantResponse = xhr._tsoUrl && (
-            xhr._tsoUrl.indexOf('GameServer') >= 0 ||
-            xhr._tsoUrl.indexOf('amf') >= 0
-        );
+        // Match the fetch path: only the AMF endpoint, not every GameServer URL.
+        var wantResponse = xhr._tsoUrl && xhr._tsoUrl.indexOf('GameServer/amf') >= 0;
         if (wantResponse) {
             xhr.addEventListener('load', function() {
                 try {

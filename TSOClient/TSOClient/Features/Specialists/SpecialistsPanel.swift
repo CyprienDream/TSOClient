@@ -1,10 +1,16 @@
 import SwiftUI
+import Combine
 
 struct SpecialistsPanel: View {
     var store: SpecialistsStore
     var coordinator: SpecialistDispatchCoordinator
+    var sender: BridgeSender
 
     @State private var filter: SpecialistKind? = nil   // nil = All
+    // Single 1Hz tick fanned out to every visible row's countdown. Each row used
+    // to own its own Timer.publish, which scaled badly with specialist count.
+    @State private var now = Date()
+    private let tick = Timer.publish(every: 1, on: .main, in: .common).autoconnect()
 
     private let filters: [SpecialistKind?] = [nil, .geologist, .explorer, .general]
 
@@ -49,6 +55,7 @@ struct SpecialistsPanel: View {
                         taskStartedAt: store.taskStartedAt[spec.id],
                         learnedDurations: store.learnedDurations,
                         pfbActive: store.pfbActive,
+                        now: now,
                         taskCode: Binding(
                             get: { coordinator.resolvedTaskCode(for: spec) },
                             set: { coordinator.selectedTasks[spec.id] = $0 }
@@ -66,6 +73,7 @@ struct SpecialistsPanel: View {
             }
         }
         .frame(width: 320)
+        .onReceive(tick) { now = $0 }
     }
 
     private var header: some View {
@@ -77,6 +85,13 @@ struct SpecialistsPanel: View {
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
+            Button {
+                sender.reloadWebView()
+            } label: {
+                Image(systemName: "arrow.clockwise")
+            }
+            .buttonStyle(.borderless)
+            .help("Reload game (purges cache)")
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 8)
@@ -173,51 +188,59 @@ struct SpecialistsPanel: View {
     private var playerBuffsSection: some View {
         VStack(alignment: .leading, spacing: 4) {
             Divider()
-            Toggle(isOn: Binding(
-                get: { store.pfbActive },
-                set: { store.pfbActive = $0 }
-            )) {
+            HStack {
                 Text("Prestigious Friend Buff (−20%)")
                     .font(.caption).bold()
+                Spacer()
+                Toggle("", isOn: Binding(
+                    get: { store.pfbActive },
+                    set: { store.pfbActive = $0 }
+                ))
+                .labelsHidden()
+                .toggleStyle(.switch)
+                .controlSize(.small)
             }
-            .toggleStyle(.switch)
-            .controlSize(.small)
         }
         .padding(.horizontal, 10)
         .padding(.vertical, 6)
     }
 
-    // Toggle + picker for the Stone Cold geologist sweep. Zone-refresh only
-    // for now — no per-uid timer — because geologist task durations aren't
-    // predictable enough yet to estimate completion. Hidden when filtered
-    // to a non-geologist view.
+    // Per-geologist-subtype auto-loop sections. Each supported subtype
+    // (Stone Cold, Diligent, …) gets its own toggle + task picker, so the
+    // user can loop Stone Cold on Granite and Diligent on Gold in parallel.
+    // Zone-refresh only — no per-uid timer — because geologist task
+    // durations aren't predictable enough yet to estimate completion.
     @ViewBuilder
     private var autoGeologistLoopSection: some View {
         if filter == nil || filter == .geologist {
             VStack(alignment: .leading, spacing: 4) {
-                Divider()
-                HStack {
-                    Toggle(isOn: Binding(
-                        get: { coordinator.autoGeologistLoopEnabled },
-                        set: { coordinator.autoGeologistLoopEnabled = $0 }
-                    )) {
-                        Text("Auto-loop Stone Cold Geologists")
+                ForEach(GeologistAutoLoopSubtype.supported) { sub in
+                    Divider()
+                    let state = coordinator.geologistLoopState(subTypeId: sub.subTypeId)
+                    HStack {
+                        Text("Auto-loop \(sub.label) Geologists")
                             .font(.caption).bold()
+                        Spacer()
+                        Toggle("", isOn: Binding(
+                            get: { state.enabled },
+                            set: { coordinator.setGeologistLoopEnabled($0, subTypeId: sub.subTypeId) }
+                        ))
+                        .labelsHidden()
+                        .toggleStyle(.switch)
+                        .controlSize(.small)
                     }
-                    .toggleStyle(.switch)
-                    .controlSize(.small)
-                }
-                Picker("", selection: Binding(
-                    get: { coordinator.autoGeologistLoopTask },
-                    set: { coordinator.autoGeologistLoopTask = $0 }
-                )) {
-                    ForEach(GeologistTask.allCases) { t in
-                        Text(t.label(forPlayerLevel: store.playerLevel)).tag(t)
+                    Picker("", selection: Binding(
+                        get: { state.task },
+                        set: { coordinator.setGeologistLoopTask($0, subTypeId: sub.subTypeId) }
+                    )) {
+                        ForEach(GeologistTask.allCases) { t in
+                            Text(t.label(forPlayerLevel: store.playerLevel)).tag(t)
+                        }
                     }
+                    .labelsHidden()
+                    .frame(maxWidth: .infinity)
+                    .disabled(state.enabled)
                 }
-                .labelsHidden()
-                .frame(maxWidth: .infinity)
-                .disabled(coordinator.autoGeologistLoopEnabled)
             }
             .padding(.horizontal, 10)
             .padding(.vertical, 6)
@@ -235,13 +258,14 @@ struct SpecialistsPanel: View {
             VStack(alignment: .leading, spacing: 4) {
                 Divider()
                 HStack {
-                    Toggle(isOn: Binding(
+                    Text("Auto-loop Explorers")
+                        .font(.caption).bold()
+                    Spacer()
+                    Toggle("", isOn: Binding(
                         get: { coordinator.autoExplorerLoopEnabled },
                         set: { coordinator.autoExplorerLoopEnabled = $0 }
-                    )) {
-                        Text("Auto-loop Explorers")
-                            .font(.caption).bold()
-                    }
+                    ))
+                    .labelsHidden()
                     .toggleStyle(.switch)
                     .controlSize(.small)
                 }

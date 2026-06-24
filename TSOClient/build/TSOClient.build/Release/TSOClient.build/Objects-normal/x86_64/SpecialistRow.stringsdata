@@ -1,0 +1,88 @@
+{
+  "source": "/Users/cyprieneckert/Desktop/TSOClient/TSOClient/TSOClient/Features/Specialists/SpecialistRow.swift",
+  "tables": {
+    "Localizable": [
+      {
+        "comment": "",
+        "key": "Idle",
+        "location": {
+          "startingColumn": 18,
+          "startingLine": 43
+        }
+      },
+      {
+        "comment": "",
+        "key": "Done?",
+        "location": {
+          "startingColumn": 26,
+          "startingLine": 70
+        }
+      },
+      {
+        "comment": "",
+        "key": "Busy",
+        "location": {
+          "startingColumn": 18,
+          "startingLine": 83
+        }
+      },
+      {
+        "comment": "",
+        "key": "Unknown type — reload zone to repopulate.",
+        "location": {
+          "startingColumn": 18,
+          "startingLine": 137
+        }
+      },
+      {
+        "comment": "",
+        "key": "Task",
+        "location": {
+          "startingColumn": 24,
+          "startingLine": 94
+        }
+      },
+      {
+        "comment": "",
+        "key": "Dispatch",
+        "location": {
+          "startingColumn": 16,
+          "startingLine": 143
+        }
+      },
+      {
+        "comment": "",
+        "key": "Task",
+        "location": {
+          "startingColumn": 24,
+          "startingLine": 105
+        }
+      },
+      {
+        "comment": "",
+        "key": "Grid:",
+        "location": {
+          "startingColumn": 26,
+          "startingLine": 119
+        }
+      },
+      {
+        "comment": "",
+        "key": "0",
+        "location": {
+          "startingColumn": 31,
+          "startingLine": 121
+        }
+      },
+      {
+        "comment": "",
+        "key": "Send to Star",
+        "location": {
+          "startingColumn": 28,
+          "startingLine": 129
+        }
+      }
+    ]
+  },
+  "version": 1
+}
