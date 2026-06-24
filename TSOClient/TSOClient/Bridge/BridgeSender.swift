@@ -1,7 +1,7 @@
 import Observation
 
 @Observable
-final class BridgeSender: OutboundDispatching {
+final class BridgeSender {
     private let logger: Logger
     private let serializer: WireCommandJSSerializing
     private let executor: JSExecutor

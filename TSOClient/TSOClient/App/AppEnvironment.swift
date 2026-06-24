@@ -10,7 +10,7 @@ struct AppEnvironment {
     let buildings: BuildingsStore
     let buffs: BuffsStore
     let executor: WKWebViewJSExecutor     // late-binding webView holder
-    let sender: BridgeSender              // also conforms to OutboundDispatching
+    let sender: BridgeSender              // produces JS via WireCommandJSSerializing
     let inbound: InboundDispatcher
     let specialistDispatch: SpecialistDispatchCoordinator
     let buffDispatch: BuffDispatchCoordinator

@@ -1,9 +1,8 @@
 import Foundation
 
-// Domain-shaped dispatch contracts. Coordinators depend on these instead
-// of the broader OutboundDispatching + wire-command construction. ISP:
-// each coordinator's port is exactly the calls it needs; the coordinator
-// stops needing to know the WireCommand struct shape.
+// Domain-shaped dispatch contracts. Coordinators depend on these so each
+// only sees the calls it needs and stops needing to know the WireCommand
+// struct shape.
 protocol SpecialistDispatchPort {
     func dispatchSpecialist(uid1: Int,
                             uid2: Int,

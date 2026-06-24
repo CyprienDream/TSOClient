@@ -10,12 +10,16 @@ struct DispatchSpecialistCommand: LoggableCommand {
     let targetGrid: Int
 
     var type: String { "DISPATCH_SPECIALIST" }
-    var payload: [String: Any] {
-        // JS handler reads opts.taskCode for the subTaskID slot.
-        ["uid1": uid1, "uid2": uid2, "actionType": actionType, "taskCode": subTaskID, "targetGrid": targetGrid]
-    }
     var logSummary: String {
         "DISPATCH uid=\(uid1):\(uid2) at=\(actionType) st=\(subTaskID) g=\(targetGrid)"
+    }
+
+    // JS handler reads opts.taskCode for the subTaskID slot — wire key
+    // diverges from the Swift field name.
+    enum CodingKeys: String, CodingKey {
+        case uid1, uid2, actionType
+        case subTaskID = "taskCode"
+        case targetGrid
     }
 }
 
@@ -25,10 +29,11 @@ struct DispatchBuffCommand: LoggableCommand {
     let targetGrid: Int
 
     var type: String { "DISPATCH_BUFF" }
-    var payload: [String: Any] {
-        ["buffUid1": buffUid1, "buffUid2": buffUid2, "targetGrid": targetGrid]
-    }
     var logSummary: String {
         "DISPATCH_BUFF uid=\(buffUid1):\(buffUid2) g=\(targetGrid)"
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case buffUid1, buffUid2, targetGrid
     }
 }
