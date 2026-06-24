@@ -121,6 +121,10 @@ TSOClient/                      ← Xcode project root
         naming.json               ← human-readable display overrides
     Info.plist                    ← NSAllowsArbitraryLoads = true (game CDN needs it)
     TSOClient.entitlements        ← sandbox + network.client
+  TSOClientTests/               ← Swift Testing suites (@Suite / @Test); see "Testing & CI" below
+.github/
+  workflows/
+    ci.yml                      ← PR pipeline: builds the app and runs the test suite on macos-15
 ```
 
 ## Architecture in one paragraph
@@ -317,10 +321,25 @@ What was tried:
 - **JS debugging**: add `webkit.messageHandlers.logger.postMessage(...)` calls freely; they stream to Xcode console with `[JS]` prefix. Or set `window._tsoDiag = true` from Safari Web Inspector to enable the gated `_tsoDiagLog` traces. Never remove the `"logger"` handler registration.
 - **JS files**: edit `Resources/JS/*.js` directly. No recompile needed to change JS logic — only a re-run.
 
+## Testing & CI
+
+- **Test target**: `TSOClientTests` (`com.apple.product-type.bundle.unit-test`), wired into the `TSOClient` shared scheme's `TestAction`. Uses **Swift Testing** (`@Suite` / `@Test`), not XCTest.
+- **Current suites**: `BridgeTests` (InboundDispatcher + outbound JS serializer), `CoordinatorTests` (specialist + buff dispatch coordinators, including auto-loop re-dispatch timers), `RegistryTests`, `SpecialistLearnerTests`. `Mocks.swift` provides `MockLogger`, `MockKeyValueStore`, `MockResourceLoader`, `CapturingDispatcher` — fake the relevant narrow seam, don't spin up `AppEnvironment`.
+- **Run locally**:
+  ```
+  DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer \
+  xcodebuild -project TSOClient/TSOClient.xcodeproj \
+             -scheme TSOClient \
+             -destination 'platform=macOS' \
+             test
+  ```
+- **CI**: `.github/workflows/ci.yml` runs on every `pull_request` event (push to any branch with an open PR). Single `build-and-test` job on `macos-15`: ad-hoc signs (`CODE_SIGN_IDENTITY=-`, `CODE_SIGNING_REQUIRED=NO`), then runs `xcodebuild build` followed by `xcodebuild test`. `concurrency` cancels superseded runs on the same PR branch.
+- **Branch protection** (must be configured in GitHub UI, not in YAML): require status check `Build & Test` on `main` to block merges on red CI.
+
 ## What does NOT exist yet
 
 - **In-game UI refresh on injected dispatch** — structural Unity limitation (see "Unity UI refresh dead end"). Mitigated by optimistic UI in our own panel.
 - **Geologist task ETA / countdown** — `geologist-durations.json` base-duration table is unpopulated. Auto-loop relies on zone-reload re-fires until a duration model exists. Populate by observation.
 - **General dispatch auto-populated `garrisonBuildingGridPos`** — value is on `dSpecialistVO` but not threaded into `SpecialistItem`; user enters grid manually.
 - **Adventure features, trading, building/production automation.**
-- **Unit or UI tests.** Architecture is set up for them (narrow protocols at every seam) but no test target exists yet.
+- **UI tests.** Unit tests exist (`TSOClientTests/`); no UI/integration target.
