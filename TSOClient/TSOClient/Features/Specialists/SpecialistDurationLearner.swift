@@ -3,8 +3,8 @@ import Observation
 
 // Owns the busy/idle state machine for specialists: tracks wall-clock task
 // start anchors, learns total durations on completion, and persists the table
-// across app restarts. Logging is funnelled through an injected Logger so
-// tests can capture it.
+// across app restarts. Log-line formatting is delegated to
+// SpecialistDurationLogger.
 //
 // ct (collectedTime) is in base-time-equivalent milliseconds: it advances at
 // bonus/100 × real time, so a 3× subtype's ct ticks 3× wall clock. Real
@@ -24,14 +24,15 @@ final class SpecialistDurationLearner {
     private var busySnapshots: [String: BusySnapshot] = [:]
 
     private let store: KeyValueStore
-    private let logger: Logger
+    private let durationLogger: SpecialistDurationLogger
     private let persistKey: String
 
     init(store: KeyValueStore = UserDefaultsKeyValueStore(),
          logger: Logger = ConsoleLogger(),
+         durationLogger: SpecialistDurationLogger? = nil,
          persistKey: String = "tsoLearnedDurations") {
         self.store = store
-        self.logger = logger
+        self.durationLogger = durationLogger ?? SpecialistDurationLogger(logger: logger)
         self.persistKey = persistKey
         if let saved = store.dictionary(forKey: persistKey) as? [String: Int] {
             self.learnedDurations = saved
@@ -111,8 +112,8 @@ final class SpecialistDurationLearner {
             lastCt: ct,
             lastCtAt: now
         )
-        logBusy(item: item, ct: ct, actionType: at, subTaskId: st, bonus: bonus,
-                pfbActive: pfbActive, formatter: formatter)
+        durationLogger.busy(item: item, ct: ct, actionType: at, subTaskId: st, bonus: bonus,
+                            pfbActive: pfbActive, formatter: formatter)
     }
 
     private func applyIdleTransition(item: InboundMessage.SpecialistsPayload.Item,
@@ -128,72 +129,17 @@ final class SpecialistDurationLearner {
             }()
             let key = "\(snap.subTypeId):\(snap.actionType):\(snap.subTaskId)"
             persistDuration(key: key, value: totalRealMs)
-            logDivergence(snap: snap, observedMs: totalRealMs, skills: item.skills, pfbActive: pfbActive)
+            durationLogger.divergence(
+                subTypeId: snap.subTypeId, actionType: snap.actionType, subTaskId: snap.subTaskId,
+                observedMs: totalRealMs, skills: item.skills, pfbActive: pfbActive)
         }
         taskStartedAt.removeValue(forKey: item.uid)
         busySnapshots.removeValue(forKey: item.uid)
-        logIdle(item: item, formatter: formatter)
+        durationLogger.idle(item: item, formatter: formatter)
     }
 
     private func persistDuration(key: String, value: Int) {
         learnedDurations[key] = value
         store.set(learnedDurations, forKey: persistKey)
-    }
-
-    private static func logPrefix(for kind: SpecialistKind) -> String? {
-        switch kind {
-        case .explorer:  return "ExplorerDuration"
-        case .geologist: return "GeologistDuration"
-        case .general, .unknown: return nil
-        }
-    }
-
-    private func logBusy(item: InboundMessage.SpecialistsPayload.Item,
-                         ct: Int, actionType: Int, subTaskId: Int, bonus: Int,
-                         pfbActive: Bool,
-                         formatter: SpecialistDisplayFormatter) {
-        guard let prefix = Self.logPrefix(for: item.specialistType) else { return }
-        let code = TaskCode(actionType: actionType, subTaskID: subTaskId)
-        let skillStr = item.skills.map { "\($0.id)/\($0.level)" }.joined(separator: ",")
-        let realElapsedS = Double(ct) / 1000.0 * 100.0 / Double(bonus)
-        let name = formatter.compactDisplayName(forPayloadItem: item)
-        if let predicted = ExplorerDurationRegistry.estimate(
-            task: code, subTypeId: item.subTypeId, skills: item.skills, pfbActive: pfbActive) {
-            let remainingS = max(0, predicted - realElapsedS)
-            logger.log("[\(prefix)] busy \"\(name)\" uid=\(item.uid) type=\(item.subTypeId) " +
-                       "task=\(actionType),\(subTaskId) skills=[\(skillStr)] " +
-                       "predicted=\(Int(predicted))s elapsed=\(Int(realElapsedS))s " +
-                       "remaining=\(Int(remainingS))s")
-        } else {
-            logger.log("[\(prefix)] busy \"\(name)\" uid=\(item.uid) type=\(item.subTypeId) " +
-                       "task=\(actionType),\(subTaskId) skills=[\(skillStr)] " +
-                       "elapsed=\(Int(realElapsedS))s")
-        }
-    }
-
-    private func logIdle(item: InboundMessage.SpecialistsPayload.Item,
-                         formatter: SpecialistDisplayFormatter) {
-        guard let prefix = Self.logPrefix(for: item.specialistType) else { return }
-        let skillStr = item.skills.map { "\($0.id)/\($0.level)" }.joined(separator: ",")
-        let name = formatter.compactDisplayName(forPayloadItem: item)
-        logger.log("[\(prefix)] idle \"\(name)\" uid=\(item.uid) type=\(item.subTypeId) skills=[\(skillStr)]")
-    }
-
-    private func logDivergence(snap: BusySnapshot, observedMs: Int,
-                               skills: [SpecialistSkill], pfbActive: Bool) {
-        // Surface table errors: predicted vs observed should agree closely.
-        // >5% divergence usually means a wrong timeBonus, a missing skill
-        // mapping, or a missing base duration entry.
-        let code = TaskCode(actionType: snap.actionType, subTaskID: snap.subTaskId)
-        guard let predicted = ExplorerDurationRegistry.estimate(
-            task: code, subTypeId: snap.subTypeId, skills: skills, pfbActive: pfbActive) else { return }
-        let observedSec = Double(observedMs) / 1000.0
-        let delta = abs(predicted - observedSec) / observedSec
-        guard delta > 0.05 else { return }
-        let key = "\(snap.subTypeId):\(snap.actionType):\(snap.subTaskId)"
-        let skillStr = skills.map { "\($0.id)/\($0.level)" }.joined(separator: ",")
-        logger.log("[ExplorerDuration] divergence \(Int(delta*100))% " +
-                   "key=\(key) skills=\(skillStr) " +
-                   "predicted=\(Int(predicted))s observed=\(Int(observedSec))s")
     }
 }
