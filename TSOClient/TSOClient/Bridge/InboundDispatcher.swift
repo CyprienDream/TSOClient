@@ -18,14 +18,19 @@ final class InboundDispatcher {
         guard name == "tso" else { return }
         guard let dict = body as? [String: Any],
               let type = dict["type"] as? String,
-              let payload = dict["payload"],
-              JSONSerialization.isValidJSONObject(payload),
-              let data = try? JSONSerialization.data(withJSONObject: payload) else {
+              let payload = dict["payload"] else {
             logger.log("[Inbound] malformed message: \(body)")
             return
         }
+        // Look the handler up before serialising the payload — unknown
+        // message types skip the JSONSerialization round-trip entirely.
         guard let handler = handlers[type] else {
             logger.log("[Inbound] no handler for type '\(type)'")
+            return
+        }
+        guard JSONSerialization.isValidJSONObject(payload),
+              let data = try? JSONSerialization.data(withJSONObject: payload) else {
+            logger.log("[Inbound] malformed message: \(body)")
             return
         }
         do {
