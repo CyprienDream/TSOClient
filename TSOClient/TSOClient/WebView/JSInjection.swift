@@ -16,20 +16,32 @@ enum JSInjection {
     //     non-collectible URLs breaks). DO NOT reorder.
     //   unity-probe — touches window.createUnityInstance only; ordering relative
     //     to the fetch chain doesn't matter.
-    static func install(into controller: WKUserContentController) {
-        let sources = [
-            load("bridge"),
-            load("amf3-parser"),
-            load("amf3-classifier"),
-            load("amf3-scanner"),
-            load("amf3-net"),
-            load("amf3-encoder"),
-            resolvePatched("collectible-patcher"),
-            load("unity-probe"),
+    static func modules() -> [JSModule] {
+        [
+            JSModule("bridge"),
+            JSModule("amf3-parser"),
+            JSModule("amf3-classifier"),
+            JSModule("amf3-scanner"),
+            JSModule("amf3-net"),
+            JSModule("amf3-encoder"),
+            JSModule("collectible-patcher", preProcess: { src in
+                guard let hashURL = Bundle.main.url(forResource: "collectible-hashes", withExtension: "json"),
+                      let hashData = try? Data(contentsOf: hashURL),
+                      let hashJSON = String(data: hashData, encoding: .utf8) else {
+                    fatalError("Missing Data resource: collectible-hashes.json")
+                }
+                return src.replacingOccurrences(of: "/*__HASHES__*/[]", with: hashJSON)
+            }),
+            JSModule("unity-probe"),
         ]
-        for source in sources {
+    }
+
+    static func install(into controller: WKUserContentController) {
+        for module in modules() {
+            var src = load(module.name)
+            if let preProcess = module.preProcess { src = preProcess(src) }
             controller.addUserScript(
-                WKUserScript(source: source, injectionTime: .atDocumentStart, forMainFrameOnly: false)
+                WKUserScript(source: src, injectionTime: .atDocumentStart, forMainFrameOnly: false)
             )
         }
     }
@@ -39,17 +51,6 @@ enum JSInjection {
               let src = try? String(contentsOf: url, encoding: .utf8) else {
             fatalError("Missing JS resource: \(name).js")
         }
-        return src
-    }
-
-    private static func resolvePatched(_ name: String) -> String {
-        var src = load(name)
-        guard let hashURL = Bundle.main.url(forResource: "collectible-hashes", withExtension: "json"),
-              let hashData = try? Data(contentsOf: hashURL),
-              let hashJSON = String(data: hashData, encoding: .utf8) else {
-            fatalError("Missing Data resource: collectible-hashes.json")
-        }
-        src = src.replacingOccurrences(of: "/*__HASHES__*/[]", with: hashJSON)
         return src
     }
 }

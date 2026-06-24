@@ -41,10 +41,7 @@ struct AppEnvironment {
         inbound.register(BuffsHandler(store: buffs, logger: logger))
         inbound.register(PlayerBuffsHandler(store: specialists, logger: logger))
         inbound.register(GameStateHandler(
-            collectibles: collectibles,
-            specialists: specialists,
-            buildings: buildings,
-            buffs: buffs,
+            stores: [collectibles, specialists, buildings, buffs],
             logger: logger
         ))
         self.inbound = inbound

@@ -89,6 +89,10 @@ final class SpecialistDispatchCoordinator {
     private let logger: Logger
     private let defaults: UserDefaults
     private let estimator: (SpecialistItem, TaskCode, Bool) -> TimeInterval?
+    // Registered auto-loop strategies keyed by id. The runAuto* methods are
+    // facades that look up by a known id; adding a new auto-loop kind means
+    // registering a new strategy here, not adding more runAuto* methods.
+    private var strategies: [String: any AutoLoopStrategy] = [:]
 
     init(store: SpecialistsStore,
          dispatcher: OutboundDispatching,
@@ -120,6 +124,29 @@ final class SpecialistDispatchCoordinator {
             }
             self.geologistLoops[sub.subTypeId] = state
         }
+        registerStrategies()
+    }
+
+    private func registerStrategies() {
+        let explorer = ExplorerAutoLoopStrategy(
+            isEnabled:   { [weak self] in self?.autoExplorerLoopEnabled ?? false },
+            currentTask: { [weak self] in self?.autoExplorerLoopTask ?? .treasureShort },
+            buffer:      { [weak self] in self?.autoReDispatchBuffer ?? 8 },
+            estimator:   estimator
+        )
+        register(explorer)
+        for sub in GeologistAutoLoopSubtype.supported {
+            let strategy = GeologistAutoLoopStrategy(
+                subTypeId:    sub.subTypeId,
+                getState:     { [weak self] in self?.geologistLoopState(subTypeId: sub.subTypeId) ?? GeologistLoopState() },
+                subtypeLabel: sub.label
+            )
+            register(strategy)
+        }
+    }
+
+    private func register(_ strategy: any AutoLoopStrategy) {
+        strategies[strategy.id] = strategy
     }
 
     deinit {
@@ -156,31 +183,39 @@ final class SpecialistDispatchCoordinator {
         scheduleAutoReDispatch(spec: spec, taskCode: taskCode)
     }
 
-    // For explorers dispatched while the auto-loop is on, schedule a Task
-    // that wakes after the predicted task duration and re-dispatches them
-    // to `autoExplorerLoopTask`. Replaces any in-flight wake for the same
-    // uid so back-to-back dispatches don't accumulate timers.
+    // After every dispatch, ask each strategy whether it wants to arm a
+    // wake-up timer for this spec. Only one strategy is expected to claim
+    // a given spec (e.g. ExplorerAutoLoopStrategy claims idle explorers
+    // when the loop is on); the first non-nil delay wins. Replaces any
+    // in-flight wake for the same uid so back-to-back dispatches don't
+    // accumulate timers.
     private func scheduleAutoReDispatch(spec: SpecialistItem, taskCode: TaskCode) {
-        guard autoExplorerLoopEnabled,
-              spec.specialistType == .explorer,
-              let estimate = estimator(spec, taskCode, store.pfbActive)
-        else { return }
+        let pfb = store.pfbActive
+        let claim: (strategyId: String, delay: TimeInterval)? = {
+            for strategy in strategies.values {
+                if let d = strategy.reDispatchDelay(for: spec, taskCode: taskCode, pfbActive: pfb) {
+                    return (strategy.id, d)
+                }
+            }
+            return nil
+        }()
+        guard let (strategyId, delaySec) = claim else { return }
         pendingReDispatches[spec.id]?.cancel()
         let uid = spec.id
-        let delaySec = estimate + autoReDispatchBuffer
         pendingReDispatches[uid] = Task { @MainActor [weak self] in
             try? await Task.sleep(nanoseconds: UInt64(max(0, delaySec) * 1_000_000_000))
             if Task.isCancelled { return }
             guard let self else { return }
             self.pendingReDispatches.removeValue(forKey: uid)
-            guard self.autoExplorerLoopEnabled,
+            // Original behaviour: at wake, re-check enabled/kind/skill but
+            // not isIdle (server-side state may not have flipped yet).
+            guard let strategy = self.strategies[strategyId],
                   let current = self.store.items.first(where: { $0.id == uid }),
-                  current.specialistType == .explorer
+                  strategy.matches(spec: current, playerLevel: self.store.playerLevel)
             else { return }
-            let next = self.autoExplorerLoopTask
-            guard next.isAvailable(skillIDs: current.skills.map(\.id)) else { return }
-            self.logger.log("[AutoLoop] timer wake — re-dispatching uid=\(uid) to \(next.label)")
-            self.dispatchOne(spec: current, taskCode: next.taskCode, targetGrid: 0)
+            let next = strategy.taskCode(for: current)
+            self.logger.log("[AutoLoop] timer wake — re-dispatching uid=\(uid) to \(strategy.taskLogLabel)")
+            self.dispatchOne(spec: current, taskCode: next, targetGrid: 0)
         }
     }
 
@@ -190,31 +225,16 @@ final class SpecialistDispatchCoordinator {
     }
 
     // Auto-loop entry point. Called from SpecialistsHandler after a fresh
-    // SPECIALISTS payload is applied, and from the toggle's didSet. Quietly
-    // no-ops when the toggle is off or no idle explorers can run the task.
+    // SPECIALISTS payload is applied, and from the toggle's didSet.
+    // Delegates to the registered explorer strategy.
     @discardableResult
     func runAutoExplorerLoop() -> Task<Void, Never>? {
-        guard autoExplorerLoopEnabled else { return nil }
-        let task = autoExplorerLoopTask
-        let code = task.taskCode
-        let candidates = store.items.filter {
-            $0.specialistType == .explorer && $0.isIdle &&
-            task.isAvailable(skillIDs: $0.skills.map(\.id))
-        }
-        guard !candidates.isEmpty else { return nil }
-        logger.log("[AutoLoop] dispatching \(candidates.count) idle explorer(s) to \(task.label)")
-        let plan = candidates.map { ($0, code, 0) }
-        return bulk.run(items: plan) { [self] i, item in
-            let (spec, tc, grid) = item
-            dispatchOne(spec: spec, taskCode: tc, targetGrid: grid)
-        }
+        runStrategy(id: "auto-loop-explorer")
     }
 
-    // Geologist counterpart to runAutoExplorerLoop. Runs every enabled
-    // per-subtype loop (Stone Cold, Diligent, …). No per-uid timer —
-    // relies on the next SPECIALISTS payload (typically a zone reload) to
-    // re-fire, because geologist task durations aren't reliable enough yet
-    // to predict completion.
+    // Geologist counterpart. Fires every registered per-subtype geologist
+    // strategy. No per-uid timer — the strategies' reDispatchDelay returns
+    // nil — so the loop relies on the next SPECIALISTS payload to re-fire.
     func runAutoGeologistLoop() {
         for sub in GeologistAutoLoopSubtype.supported {
             if let t = runAutoGeologistLoop(subTypeId: sub.subTypeId) {
@@ -225,21 +245,19 @@ final class SpecialistDispatchCoordinator {
 
     @discardableResult
     func runAutoGeologistLoop(subTypeId: Int) -> Task<Void, Never>? {
-        let state = geologistLoopState(subTypeId: subTypeId)
-        guard state.enabled else { return nil }
-        let task = state.task
-        let code = task.taskCode
-        let candidates = store.items.filter {
-            $0.specialistType == .geologist &&
-            $0.subTypeId == subTypeId &&
-            $0.isIdle &&
-            task.isAvailable(playerLevel: store.playerLevel)
-        }
-        guard !candidates.isEmpty else { return nil }
-        let label = GeologistAutoLoopSubtype.label(forSubTypeId: subTypeId)
-        logger.log("[AutoLoop] dispatching \(candidates.count) idle \(label) geologist(s) to \(task.label)")
-        let plan = candidates.map { ($0, code, 0) }
-        return bulk.run(items: plan) { [self] i, item in
+        runStrategy(id: "auto-loop-geologist-\(subTypeId)")
+    }
+
+    // Runs a single registered strategy. Returns the bulk-dispatch Task or
+    // nil if the strategy has no candidates.
+    @discardableResult
+    private func runStrategy(id: String) -> Task<Void, Never>? {
+        guard let strategy = strategies[id] else { return nil }
+        let cands = strategy.candidates(in: store.items, playerLevel: store.playerLevel)
+        guard !cands.isEmpty else { return nil }
+        logger.log("[AutoLoop] dispatching \(cands.count) idle \(strategy.logLabel)(s) to \(strategy.taskLogLabel)")
+        let plan = cands.map { spec in (spec, strategy.taskCode(for: spec), 0) }
+        return bulk.run(items: plan) { [self] _, item in
             let (spec, tc, grid) = item
             dispatchOne(spec: spec, taskCode: tc, targetGrid: grid)
         }
