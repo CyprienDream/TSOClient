@@ -30,7 +30,7 @@ final class SpecialistsStore {
     func apply(_ payload: InboundMessage.SpecialistsPayload) {
         learner.process(payload: payload, formatter: formatter, pfbActive: pfbActive)
 
-        items = payload.items.map {
+        let next = payload.items.map {
             SpecialistItem(
                 id:             $0.uid,
                 uid1:           $0.uid1,
@@ -47,6 +47,18 @@ final class SpecialistsStore {
                 taskActionType: $0.taskActionType,
                 taskSubTaskId:  $0.taskSubTaskId
             )
+        }
+        // Avoid blowing up SwiftUI row identity when nothing actually changed.
+        // If the id sequence still matches, replace only the indices whose
+        // content actually differs; otherwise fall back to a full swap.
+        let sameShape = items.count == next.count &&
+            zip(items, next).allSatisfy { $0.id == $1.id }
+        if sameShape {
+            for idx in next.indices where items[idx] != next[idx] {
+                items[idx] = next[idx]
+            }
+        } else {
+            items = next
         }
         if let lvl = payload.playerLevel { playerLevel = lvl }
         if let t = payload.serverTime {

@@ -1,5 +1,4 @@
 import SwiftUI
-import Combine
 
 struct SpecialistRow: View {
     let spec: SpecialistItem
@@ -8,13 +7,13 @@ struct SpecialistRow: View {
     let taskStartedAt: Date?
     let learnedDurations: [String: Int]
     let pfbActive: Bool
+    // Driven by a single panel-level tick so we don't spin up one Timer per row.
+    let now: Date
     @Binding var taskCode: TaskCode
     @Binding var targetGrid: Int
     var onDispatch: (TaskCode, Int) -> Void
 
-    @State private var now = Date()
     @State private var gridText: String = "0"
-    private let timer = Timer.publish(every: 1, on: .main, in: .common).autoconnect()
 
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
@@ -34,7 +33,6 @@ struct SpecialistRow: View {
             taskControls
         }
         .padding(.vertical, 4)
-        .onReceive(timer) { now = $0 }
     }
 
     @ViewBuilder
@@ -45,7 +43,22 @@ struct SpecialistRow: View {
                 .foregroundStyle(.white)
                 .padding(.horizontal, 6).padding(.vertical, 2)
                 .background(Color.green, in: Capsule())
-        } else if let startedAt = taskStartedAt {
+        } else {
+            VStack(alignment: .trailing, spacing: 1) {
+                if let task = spec.currentTaskLabel {
+                    Text(task)
+                        .font(.caption2).bold()
+                        .foregroundStyle(.primary)
+                        .lineLimit(1)
+                }
+                timerLabel
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var timerLabel: some View {
+        if let startedAt = taskStartedAt {
             let elapsed = max(0, now.timeIntervalSince(startedAt))
             // Prefer the registry estimate (uses subtype multiplier + skill effects).
             // Fall back to learnedDurations for non-Explorer specialists. Fall back to
@@ -81,7 +94,7 @@ struct SpecialistRow: View {
             }
         } else {
             Text("Busy")
-                .font(.caption)
+                .font(.caption2)
                 .foregroundStyle(.secondary)
         }
     }

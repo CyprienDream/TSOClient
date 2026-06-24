@@ -18,6 +18,17 @@
         }
     };
 
+    // Diagnostic logger — gated by _tsoDiag so per-response AMF dumps don't
+    // hammer the Swift logger bridge during long sessions. Each call is a
+    // bridge IPC + main-thread hop + os_log write; over hours of play that
+    // dominates CPU when verbose logs are on. Toggle from Safari Web Inspector:
+    //   window._tsoDiag = true
+    window._tsoDiag = false;
+    window._tsoDiagLog = function(msg) {
+        if (!window._tsoDiag) return;
+        try { webkit.messageHandlers.logger.postMessage(msg); } catch(_) {}
+    };
+
     // Swift → JS: Swift calls evaluateJavaScript("window.TSOBridge.receive(…)")
     window.TSOBridge = {
         _handlers: {},

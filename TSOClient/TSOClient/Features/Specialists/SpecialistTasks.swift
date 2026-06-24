@@ -112,3 +112,22 @@ enum ExplorerTask: String, CaseIterable, Identifiable {
 // General to star menu: actionType=12, subTaskID=0, grid=garrison grid index.
 // From fedorovvl: SendServerAction(95, 12, S.GetGarrisonGridIdx(), 0, stask) where stask.subTaskID=0.
 let generalStarMenuCode = TaskCode(actionType: 12, subTaskID: 0)
+
+// Geologist subtypes the auto-loop can drive independently. Each one gets its
+// own toggle + task picker in the panel, so e.g. Stone Cold can loop Granite
+// while Diligent loops Gold. subTypeId values map to GEOLOGIST_TYPES in
+// amf3-classifier.js.
+struct GeologistAutoLoopSubtype: Hashable, Identifiable {
+    let subTypeId: Int
+    let label: String
+    var id: Int { subTypeId }
+
+    static let supported: [GeologistAutoLoopSubtype] = [
+        .init(subTypeId: 35, label: "Stone Cold"),
+        .init(subTypeId: 59, label: "Diligent"),
+    ]
+
+    static func label(forSubTypeId id: Int) -> String {
+        supported.first { $0.subTypeId == id }?.label ?? "subType=\(id)"
+    }
+}

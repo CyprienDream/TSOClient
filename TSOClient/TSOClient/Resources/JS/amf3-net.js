@@ -33,7 +33,7 @@
                         var call = bodyArr[k];
                         if (!call || !call.__class || call.__class.indexOf('dServerCall') < 0) continue;
                         var action = call.data;
-                        webkit.messageHandlers.logger.postMessage(
+                        window._tsoDiagLog(
                             '[AMF3:out:' + channel + '] callType=' + call.type +
                             ' zoneID=' + call.zoneID +
                             ' actionType=' + (action && action.type) +
@@ -119,7 +119,7 @@
         if (isPost && init.body) {
             // Capture all POSTs — buff and other actions may use different URLs.
             captureOutboundBody(init.body, 'fetch');
-            webkit.messageHandlers.logger.postMessage('[AMF3:out:url] POST ' + url.slice(0, 120));
+            window._tsoDiagLog('[AMF3:out:url] POST ' + url.slice(0, 120));
         }
         // Always update realm URL so zone-shard changes are picked up automatically.
         if (url.includes('GameServer/amf')) {
@@ -185,7 +185,7 @@
         // Capture all POSTs — buff and other actions may use different URLs.
         if (xhr._tsoMethod === 'POST' && body) {
             captureOutboundBody(body, 'xhr');
-            webkit.messageHandlers.logger.postMessage('[AMF3:out:url] XHR POST ' + (xhr._tsoUrl || '?').slice(0, 120));
+            window._tsoDiagLog('[AMF3:out:url] XHR POST ' + (xhr._tsoUrl || '?').slice(0, 120));
         }
         var wantResponse = xhr._tsoUrl && (
             xhr._tsoUrl.indexOf('GameServer') >= 0 ||
