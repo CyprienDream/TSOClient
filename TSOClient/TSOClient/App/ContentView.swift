@@ -8,8 +8,13 @@ struct ContentView: View {
 
     var body: some View {
         HSplitView {
-            WebView(url: URL(string: "https://www.thesettlersonline.com/en/play")!, env: env)
-                .frame(minWidth: 800, minHeight: 768)
+            WebView(
+                url: URL(string: "https://www.thesettlersonline.com/en/play")!,
+                bridge: env.sender,
+                inbound: env.inbound,
+                logger: env.logger
+            )
+            .frame(minWidth: 800, minHeight: 768)
 
             VStack(spacing: 0) {
                 Picker("Tab", selection: $activeTab) {
