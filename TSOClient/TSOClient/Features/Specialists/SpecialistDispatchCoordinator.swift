@@ -87,7 +87,7 @@ final class SpecialistDispatchCoordinator {
     private let dispatcher: SpecialistDispatchPort
     private let bulk: BulkDispatcher
     private let logger: Logger
-    private let defaults: UserDefaults
+    private let defaults: KeyValueStore
     private let estimator: DurationEstimator
     // Registered auto-loop strategies keyed by id. The runAuto* methods are
     // facades that look up by a known id; adding a new auto-loop kind means
@@ -98,7 +98,7 @@ final class SpecialistDispatchCoordinator {
          dispatcher: SpecialistDispatchPort,
          bulk: BulkDispatcher = .default,
          logger: Logger = ConsoleLogger(),
-         defaults: UserDefaults = .standard,
+         defaults: KeyValueStore = UserDefaultsKeyValueStore(),
          estimator: DurationEstimator = RegistryDurationEstimator()) {
         self.store = store
         self.dispatcher = dispatcher
