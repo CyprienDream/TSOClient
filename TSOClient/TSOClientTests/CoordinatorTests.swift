@@ -19,10 +19,11 @@ private func makeItem(uid: String = "1:2", uid1: Int = 1, uid2: Int = 2,
     )
 }
 
-// Each coordinator persists auto-loop state in UserDefaults; give every test
-// a fresh suite so writes don't leak across tests or into the real domain.
-private func isolatedDefaults() -> UserDefaults {
-    UserDefaults(suiteName: "test-\(UUID().uuidString)")!
+// Each coordinator persists auto-loop state via a KeyValueStore; give every
+// test a fresh in-memory store so writes don't leak across tests or into the
+// real domain.
+private func isolatedDefaults() -> KeyValueStore {
+    MockKeyValueStore()
 }
 
 @Suite("SpecialistDispatchCoordinator")
@@ -193,7 +194,7 @@ struct SpecialistDispatchCoordinatorTests {
             bulk: BulkDispatcher(interCallDelayNs: 0),
             logger: MockLogger(),
             defaults: isolatedDefaults(),
-            estimator: { _, _, _ in 60 })   // never fires within the test window
+            estimator: FakeDurationEstimator { _, _, _ in 60 })   // never fires within the test window
         coord.autoExplorerLoopEnabled = true
         await coord.lastAutoLoopTask?.value
 
@@ -214,7 +215,7 @@ struct SpecialistDispatchCoordinatorTests {
             bulk: BulkDispatcher(interCallDelayNs: 0),
             logger: MockLogger(),
             defaults: isolatedDefaults(),
-            estimator: { _, _, _ in
+            estimator: FakeDurationEstimator { _, _, _ in
                 calls += 1
                 return calls == 1 ? 0.05 : nil
             })
@@ -241,7 +242,7 @@ struct SpecialistDispatchCoordinatorTests {
             bulk: BulkDispatcher(interCallDelayNs: 0),
             logger: MockLogger(),
             defaults: isolatedDefaults(),
-            estimator: { _, _, _ in 60 })
+            estimator: FakeDurationEstimator { _, _, _ in 60 })
         coord.autoExplorerLoopEnabled = true
         await coord.lastAutoLoopTask?.value
         #expect(coord.pendingReDispatches.count == 1)
@@ -337,7 +338,7 @@ struct SpecialistDispatchCoordinatorTests {
             bulk: BulkDispatcher(interCallDelayNs: 0),
             logger: MockLogger(),
             defaults: isolatedDefaults(),
-            estimator: { _, _, _ in 60 })  // wouldn't fire even if it ran
+            estimator: FakeDurationEstimator { _, _, _ in 60 })  // wouldn't fire even if it ran
         coord.setGeologistLoopEnabled(true, subTypeId: 35)
         await coord.lastGeologistLoopTasks[35]?.value
 
@@ -481,8 +482,9 @@ struct BuffDispatchCoordinatorTests {
                   resourceName: "Recruit", amount: 1, insertedAt: 0),
         ])
         buffs.apply(payload)
-        let classifier = BuffCategoryClassifier(
-            buildingBuffs: .init(prefixes: ["ProductivityBuff"], exact: []))
+        let classifier = BuffCategoryClassifier(rules: [
+            .buildingBuffs: .init(prefixes: ["ProductivityBuff"], exact: [])
+        ])
         let coord = BuffDispatchCoordinator(
             buffsStore: buffs, buildingsStore: BuildingsStore(),
             dispatcher: CapturingDispatcher(),

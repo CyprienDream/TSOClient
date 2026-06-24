@@ -44,14 +44,14 @@ struct SpecialistDurationLearnerTests {
         // Busy at t0 with ct=1000 ms (bonus 100 default → 1.0s elapsed).
         let busy = InboundMessage.SpecialistsPayload(
             items: [payloadItem(collectedTime: 1000, taskActionType: 0, taskSubTaskId: 0)],
-            playerLevel: nil, serverTime: nil)
+            playerLevel: nil)
         learner.process(payload: busy, formatter: SpecialistDisplayFormatter(naming: .empty), now: t0)
 
         // Idle at t1.
         let idle = InboundMessage.SpecialistsPayload(
             items: [payloadItem(isIdle: true, collectedTime: nil,
                                 taskActionType: nil, taskSubTaskId: nil)],
-            playerLevel: nil, serverTime: nil)
+            playerLevel: nil)
         learner.process(payload: idle, formatter: SpecialistDisplayFormatter(naming: .empty), now: t1)
 
         // Anchor at t0 was backtracked to (t0 - 1s); observed total at t1 = 11s ≈ 11000 ms.
@@ -69,11 +69,11 @@ struct SpecialistDurationLearnerTests {
 
         let busy = InboundMessage.SpecialistsPayload(
             items: [payloadItem(collectedTime: 1000, taskActionType: 0, taskSubTaskId: 0)],
-            playerLevel: nil, serverTime: nil)
+            playerLevel: nil)
         let idle = InboundMessage.SpecialistsPayload(
             items: [payloadItem(isIdle: true, collectedTime: nil,
                                 taskActionType: nil, taskSubTaskId: nil)],
-            playerLevel: nil, serverTime: nil)
+            playerLevel: nil)
 
         learner.process(payload: busy, formatter: SpecialistDisplayFormatter(naming: .empty), now: t0)
         learner.process(payload: idle, formatter: SpecialistDisplayFormatter(naming: .empty),
@@ -88,11 +88,11 @@ struct SpecialistDurationLearnerTests {
         let learner = SpecialistDurationLearner(
             store: MockKeyValueStore(), logger: MockLogger())
         let busy = InboundMessage.SpecialistsPayload(
-            items: [payloadItem()], playerLevel: nil, serverTime: nil)
+            items: [payloadItem()], playerLevel: nil)
         learner.process(payload: busy, formatter: SpecialistDisplayFormatter(naming: .empty))
         #expect(learner.taskStartedAt["7:8"] != nil)
 
-        let empty = InboundMessage.SpecialistsPayload(items: [], playerLevel: nil, serverTime: nil)
+        let empty = InboundMessage.SpecialistsPayload(items: [], playerLevel: nil)
         learner.process(payload: empty, formatter: SpecialistDisplayFormatter(naming: .empty))
 
         #expect(learner.taskStartedAt.isEmpty)
@@ -114,7 +114,7 @@ struct SpecialistDurationLearnerTests {
         // ct=5000 ms with default bonus 100 → 5s elapsed.
         let busy = InboundMessage.SpecialistsPayload(
             items: [payloadItem(collectedTime: 5000)],
-            playerLevel: nil, serverTime: nil)
+            playerLevel: nil)
         learner.process(payload: busy, formatter: SpecialistDisplayFormatter(naming: .empty), now: now)
 
         let anchor = learner.taskStartedAt["7:8"]
@@ -128,7 +128,7 @@ struct SpecialistDurationLearnerTests {
         let busy = InboundMessage.SpecialistsPayload(
             items: [payloadItem(kind: .geologist, collectedTime: 1000,
                                 taskActionType: 0, taskSubTaskId: 0)],
-            playerLevel: nil, serverTime: nil)
+            playerLevel: nil)
         learner.process(payload: busy, formatter: SpecialistDisplayFormatter(naming: .empty))
 
         #expect(logger.messages.contains { $0.contains("[GeologistDuration] busy") })
@@ -140,7 +140,7 @@ struct SpecialistDurationLearnerTests {
             store: MockKeyValueStore(), logger: logger)
         let busy = InboundMessage.SpecialistsPayload(
             items: [payloadItem(kind: .general, taskActionType: 12, taskSubTaskId: 0)],
-            playerLevel: nil, serverTime: nil)
+            playerLevel: nil)
         learner.process(payload: busy, formatter: SpecialistDisplayFormatter(naming: .empty))
 
         #expect(logger.messages.isEmpty)

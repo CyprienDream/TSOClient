@@ -20,13 +20,27 @@ private final class FakeHandler: InboundMessageHandler {
 
 private struct BareCommand: WireCommand {
     let type: String
-    let payload: [String: Any]
+    let x: Int
 }
 
 private struct EscapingLoggable: LoggableCommand {
     let type: String
-    let payload: [String: Any]
     let logSummary: String
+}
+
+// Encodes by throwing — drives the "serializer returns nil on encode
+// failure" branch without depending on JSON's float/date quirks.
+private struct UnencodableCommand: WireCommand {
+    let type: String = "PING"
+    func encode(to encoder: Encoder) throws {
+        throw EncodingError.invalidValue(
+            self,
+            EncodingError.Context(codingPath: [], debugDescription: "test"))
+    }
+}
+
+private func renderJSExpression(for command: WireCommand) -> String? {
+    DefaultWireCommandJSSerializer().serialize(command)
 }
 
 @Suite("InboundDispatcher")
@@ -112,7 +126,7 @@ struct RenderJSExpressionTests {
     }
 
     @Test func bareCommandHasOnlyFallbackLogLine() throws {
-        let cmd = BareCommand(type: "PING", payload: ["x": 1])
+        let cmd = BareCommand(type: "PING", x: 1)
         let js = try #require(renderJSExpression(for: cmd))
         #expect(swiftToJSCount(js) == 1)
         #expect(js.contains("type:'PING'"))
@@ -120,14 +134,14 @@ struct RenderJSExpressionTests {
     }
 
     @Test func loggableCommandIncludesLogLine() throws {
-        let cmd = EscapingLoggable(type: "PING", payload: [:], logSummary: "hello")
+        let cmd = EscapingLoggable(type: "PING", logSummary: "hello")
         let js = try #require(renderJSExpression(for: cmd))
         #expect(js.contains("[Swift→JS] hello"))
         #expect(swiftToJSCount(js) == 2)
     }
 
     @Test func logSummarySingleQuotesEscaped() throws {
-        let cmd = EscapingLoggable(type: "PING", payload: [:], logSummary: "it's me")
+        let cmd = EscapingLoggable(type: "PING", logSummary: "it's me")
         let js = try #require(renderJSExpression(for: cmd))
         // The single quote in "it's" must be backslash-escaped so it doesn't
         // terminate the JS string literal.
@@ -135,15 +149,14 @@ struct RenderJSExpressionTests {
     }
 
     @Test func logSummaryBackslashesEscaped() throws {
-        let cmd = EscapingLoggable(type: "PING", payload: [:], logSummary: #"a\b"#)
+        let cmd = EscapingLoggable(type: "PING", logSummary: #"a\b"#)
         let js = try #require(renderJSExpression(for: cmd))
         // Backslash must be doubled for the JS string literal.
         #expect(js.contains(#"a\\b"#))
     }
 
     @Test func unencodablePayloadReturnsNil() {
-        let cmd = BareCommand(type: "PING", payload: ["bad": Date()])  // Date is not JSON
-        #expect(renderJSExpression(for: cmd) == nil)
+        #expect(renderJSExpression(for: UnencodableCommand()) == nil)
     }
 
     @Test func dispatchSpecialistCommandHasExpectedShape() throws {
