@@ -86,7 +86,9 @@ struct BuffsPanel: View {
         let label = coordinator.masterBuff.isEmpty
             ? "— select buff —"
             : (buffs.first { $0.buffName == coordinator.masterBuff }?.displayLabel ?? coordinator.masterBuff)
-        let totalBuildings = snapshot.reduce(0) { $0 + $1.buildings.count }
+        let totalBuildings = snapshot.reduce(0) { acc, entry in
+            entry.category.group == BuildingGroup.unmapped.rawValue ? acc : acc + entry.buildings.count
+        }
         return VStack(alignment: .leading, spacing: 4) {
             HStack {
                 Text("Override all groups")

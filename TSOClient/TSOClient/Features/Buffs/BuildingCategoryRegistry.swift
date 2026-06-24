@@ -31,8 +31,9 @@ enum BuildingGroup: String, CaseIterable {
     case wood     = "Wood"
     case food     = "Food"
     case other    = "Other"
+    case unmapped = "Unmapped"
 
-    static let allOrdered: [BuildingGroup] = [.mines, .masons, .smelters, .wood, .food, .other]
+    static let allOrdered: [BuildingGroup] = [.mines, .masons, .smelters, .wood, .food, .other, .unmapped]
 
     var displayName: String { rawValue }
 
@@ -44,6 +45,7 @@ enum BuildingGroup: String, CaseIterable {
         case .wood:     return Color(red: 0.30, green: 0.60, blue: 0.30) // forest green
         case .food:     return Color(red: 0.85, green: 0.65, blue: 0.20) // wheat amber
         case .other:    return Color(red: 0.50, green: 0.50, blue: 0.55) // neutral
+        case .unmapped: return Color(red: 0.55, green: 0.45, blue: 0.65) // muted violet
         }
     }
 
