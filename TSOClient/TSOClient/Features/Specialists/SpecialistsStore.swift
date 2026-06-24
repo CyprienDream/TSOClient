@@ -5,8 +5,6 @@ import Observation
 final class SpecialistsStore {
     var items: [SpecialistItem] = []
     var playerLevel: Int? = nil
-    var serverTime: Double? = nil
-    var serverTimeCapturedAt: Date? = nil
 
     // Prestigious Friend Buff (MultiplierBuffZone2_PremiumFriendBuff*). When
     // toggled on, every explorer/geologist duration estimate is multiplied
@@ -46,10 +44,6 @@ final class SpecialistsStore {
         }
         SpecialistsDiffer.apply(next: next, to: &items)
         if let lvl = payload.playerLevel { playerLevel = lvl }
-        if let t = payload.serverTime {
-            serverTime = t
-            serverTimeCapturedAt = Date()
-        }
     }
 
     // Optimistic flip to non-idle. Seeds the busy snapshot immediately so the

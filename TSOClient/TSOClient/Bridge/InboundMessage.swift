@@ -57,7 +57,6 @@ enum InboundMessage {
     struct SpecialistsPayload: Decodable {
         let items: [Item]
         let playerLevel: Int?
-        let serverTime: Double?
 
         struct Item: Decodable {
             let uid: String
