@@ -15,7 +15,7 @@ final class BuffDispatchCoordinator {
     private let dispatcher: BuffDispatchPort
     private let classifier: BuffCategoryClassifier
     private let categoryRegistry: BuildingCategoryRegistry
-    private let bulk: BulkDispatcher
+    private let bulk: BulkDispatching
     private let logger: Logger
 
     init(buffsStore: BuffsStore,
@@ -23,7 +23,7 @@ final class BuffDispatchCoordinator {
          dispatcher: BuffDispatchPort,
          classifier: BuffCategoryClassifier = .default,
          categoryRegistry: BuildingCategoryRegistry = .default,
-         bulk: BulkDispatcher = .default,
+         bulk: BulkDispatching = BulkDispatcher.default,
          logger: Logger = ConsoleLogger()) {
         self.buffsStore = buffsStore
         self.buildingsStore = buildingsStore

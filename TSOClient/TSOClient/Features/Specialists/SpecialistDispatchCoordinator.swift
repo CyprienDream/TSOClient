@@ -85,7 +85,7 @@ final class SpecialistDispatchCoordinator {
 
     private let store: SpecialistsStore
     private let dispatcher: SpecialistDispatchPort
-    private let bulk: BulkDispatcher
+    private let bulk: BulkDispatching
     private let logger: Logger
     private let defaults: KeyValueStore
     private let estimator: DurationEstimator
@@ -96,7 +96,7 @@ final class SpecialistDispatchCoordinator {
 
     init(store: SpecialistsStore,
          dispatcher: SpecialistDispatchPort,
-         bulk: BulkDispatcher = .default,
+         bulk: BulkDispatching = BulkDispatcher.default,
          logger: Logger = ConsoleLogger(),
          defaults: KeyValueStore = UserDefaultsKeyValueStore(),
          estimator: DurationEstimator = RegistryDurationEstimator()) {
