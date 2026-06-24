@@ -1,4 +1,0 @@
-Target dependency graph (2 targets)
-Target 'TSOClientTests' in project 'TSOClient'
-➜ Explicit dependency on target 'TSOClient' in project 'TSOClient'
-Target 'TSOClient' in project 'TSOClient' (no dependencies)

@@ -35,26 +35,3 @@ extension GeologistTask {
         isAvailable(playerLevel: level) ? label : "\(label) (lvl \(minLevel))"
     }
 }
-
-extension SpecialistItem {
-    // Human-readable label for the task this specialist is currently running.
-    // Returns nil when the spec is idle or has no task code attached.
-    var currentTaskLabel: String? {
-        guard !isIdle,
-              let at = taskActionType, let st = taskSubTaskId else { return nil }
-        let code = TaskCode(actionType: at, subTaskID: st)
-        switch specialistType {
-        case .geologist:
-            if at == 0, let task = GeologistTask(rawValue: st) { return task.label }
-        case .explorer:
-            if let task = ExplorerTask.allCases.first(where: { $0.taskCode == code }) {
-                return task.label
-            }
-        case .general:
-            if code == generalStarMenuCode { return "Star Menu" }
-        case .unknown:
-            break
-        }
-        return "Task \(at)/\(st)"
-    }
-}

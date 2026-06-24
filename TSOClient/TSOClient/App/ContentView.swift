@@ -23,11 +23,7 @@ struct ContentView: View {
 
                 switch activeTab {
                 case .specialists:
-                    SpecialistsPanel(
-                        store: env.specialists,
-                        coordinator: env.specialistDispatch,
-                        sender: env.sender
-                    )
+                    SpecialistsPanel(store: env.specialists, coordinator: env.specialistDispatch)
                 case .buffs:
                     BuffsPanel(
                         buildingsStore: env.buildings,

@@ -35,50 +35,15 @@ final class BuffDispatchCoordinator {
         buffsStore.uniqueTypes.filter { classifier.isBuildingBuff($0.buffName) }
     }
 
-    // Fallback for any category lacking an explicit defaultBuff.
-    private static let fallbackDefaultBuff = "ProductivityBuffLvl300"
-
     var groups: [(category: BuildingCategory, buildings: [BuildingsStore.BuildingItem])] {
-        let snapshot = BuildingCategoryRegistry.categories
-            .compactMap { category -> (category: BuildingCategory, buildings: [BuildingsStore.BuildingItem])? in
+        BuildingCategoryRegistry.categories
+            .compactMap { category in
                 let buildings = buildingsStore.buildings(matchingSkinBases: category.skinBases)
                 return buildings.isEmpty ? nil : (category, buildings)
             }
             .sorted {
                 $0.category.displayName.localizedCaseInsensitiveCompare($1.category.displayName) == .orderedAscending
             }
-        applyDefaults(to: snapshot)
-        return snapshot
-    }
-
-    // Same data as `groups`, bucketed by `category.group` and emitted in the
-    // order defined by `BuildingGroup.allOrdered`. Empty buckets are skipped
-    // so the panel stays compact for new accounts. Categories within a group
-    // remain alpha-sorted (inherited from `groups`).
-    var groupedSnapshot: [(group: BuildingGroup, items: [(category: BuildingCategory, buildings: [BuildingsStore.BuildingItem])])] {
-        let flat = groups
-        var buckets: [BuildingGroup: [(category: BuildingCategory, buildings: [BuildingsStore.BuildingItem])]] = [:]
-        for entry in flat {
-            let key = BuildingGroup.from(entry.category.group)
-            buckets[key, default: []].append(entry)
-        }
-        return BuildingGroup.allOrdered.compactMap { g in
-            guard let items = buckets[g], !items.isEmpty else { return nil }
-            return (g, items)
-        }
-    }
-
-    // Seed `selectedBuff` with each category's configured default the first
-    // time a category appears, but only if the buff exists in inventory and
-    // the user hasn't already picked something. Pure side-effect on
-    // `selectedBuff`; idempotent.
-    private func applyDefaults(to snapshot: [(category: BuildingCategory, buildings: [BuildingsStore.BuildingItem])]) {
-        for group in snapshot {
-            guard selectedBuff[group.category.id] == nil else { continue }
-            let raw = group.category.defaultBuff ?? Self.fallbackDefaultBuff
-            guard buffsStore.item(for: raw) != nil else { continue }
-            selectedBuff[group.category.id] = raw
-        }
     }
 
     // Apply the master selection across every visible category.
@@ -110,30 +75,5 @@ final class BuffDispatchCoordinator {
     func buffAllGroups(snapshot: [(category: BuildingCategory, buildings: [BuildingsStore.BuildingItem])],
                        buffName: String) -> Task<Void, Never>? {
         buffAll(group: snapshot.flatMap { $0.buildings }, buffName: buffName)
-    }
-
-    // Fires one dispatch per building using each group's own current
-    // `selectedBuff`. Groups whose selection is empty or whose chosen buff
-    // isn't in inventory are skipped silently. Returned Task is the single
-    // sequential bulk run.
-    @discardableResult
-    func buffAllGroupsUsingPerGroupSelection(
-        snapshot: [(category: BuildingCategory, buildings: [BuildingsStore.BuildingItem])]
-    ) -> Task<Void, Never>? {
-        let pairs: [(building: BuildingsStore.BuildingItem, buff: BuffsStore.BuffItem)] =
-            snapshot.flatMap { group -> [(BuildingsStore.BuildingItem, BuffsStore.BuffItem)] in
-                let raw = selectedBuff[group.category.id] ?? ""
-                guard !raw.isEmpty, let buff = buffsStore.item(for: raw) else { return [] }
-                return group.buildings.map { ($0, buff) }
-            }
-        guard !pairs.isEmpty else { return nil }
-        return bulk.run(items: pairs) { [self] i, pair in
-            logger.log("[BuffAll/per-group] \(i + 1)/\(pairs.count) grid=\(pair.building.gridIndex) " +
-                       "buff=\(pair.buff.uid1):\(pair.buff.uid2)")
-            dispatcher.send(DispatchBuffCommand(
-                buffUid1: pair.buff.uid1,
-                buffUid2: pair.buff.uid2,
-                targetGrid: pair.building.gridIndex))
-        }
     }
 }

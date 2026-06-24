@@ -262,12 +262,12 @@ struct SpecialistDispatchCoordinatorTests {
             logger: MockLogger(),
             defaults: isolatedDefaults())
 
-        await coord.runAutoGeologistLoop(subTypeId: 35)?.value
+        await coord.runAutoGeologistLoop()?.value
 
         #expect(dispatcher.sent.isEmpty)
     }
 
-    @Test func autoGeologistLoopFiresOnlyMatchingSubtype() async {
+    @Test func autoGeologistLoopFiresOnlyStoneColdSubtype() async {
         let store = SpecialistsStore()
         let stoneCold = makeItem(uid: "1:1", uid1: 1, uid2: 1,
                                  kind: .geologist, subTypeId: 35)
@@ -282,50 +282,15 @@ struct SpecialistDispatchCoordinatorTests {
             bulk: BulkDispatcher(interCallDelayNs: 0),
             logger: MockLogger(),
             defaults: isolatedDefaults())
-        coord.setGeologistLoopTask(.findStone, subTypeId: 35)
-        coord.setGeologistLoopEnabled(true, subTypeId: 35)
+        coord.autoGeologistLoopTask = .findStone
+        coord.autoGeologistLoopEnabled = true
 
-        await coord.lastGeologistLoopTasks[35]?.value
+        await coord.lastAutoGeologistLoopTask?.value
 
         #expect(dispatcher.sent.count == 1)
         let cmd = dispatcher.sent[0] as? DispatchSpecialistCommand
         #expect(cmd?.uid1 == 1 && cmd?.uid2 == 1)
         #expect(cmd?.actionType == 0 && cmd?.subTaskID == 0)
-    }
-
-    @Test func autoGeologistLoopRunsDiligentOnGoldIndependently() async {
-        // Stone Cold + Diligent geologists with independent loops should
-        // each dispatch to their own task on the same sweep — Stone Cold
-        // to Granite, Diligent to Gold.
-        let store = SpecialistsStore()
-        store.playerLevel = 70   // unlock Granite (60+) and Gold (23+)
-        let stoneCold = makeItem(uid: "1:1", uid1: 1, uid2: 1,
-                                 kind: .geologist, subTypeId: 35)
-        let diligent = makeItem(uid: "5:5", uid1: 5, uid2: 5,
-                                kind: .geologist, subTypeId: 59)
-        let jolly = makeItem(uid: "9:9", uid1: 9, uid2: 9,
-                             kind: .geologist, subTypeId: 5)
-        store.items = [stoneCold, diligent, jolly]
-        let dispatcher = CapturingDispatcher()
-        let coord = SpecialistDispatchCoordinator(
-            store: store, dispatcher: dispatcher,
-            bulk: BulkDispatcher(interCallDelayNs: 0),
-            logger: MockLogger(),
-            defaults: isolatedDefaults())
-        coord.setGeologistLoopTask(.findGranite, subTypeId: 35)
-        coord.setGeologistLoopEnabled(true, subTypeId: 35)
-        coord.setGeologistLoopTask(.findGoldOre, subTypeId: 59)
-        coord.setGeologistLoopEnabled(true, subTypeId: 59)
-
-        await coord.lastGeologistLoopTasks[35]?.value
-        await coord.lastGeologistLoopTasks[59]?.value
-
-        let cmds = dispatcher.sent.compactMap { $0 as? DispatchSpecialistCommand }
-        #expect(cmds.count == 2)
-        let stoneCmd = cmds.first { $0.uid1 == 1 }
-        let diligentCmd = cmds.first { $0.uid1 == 5 }
-        #expect(stoneCmd?.actionType == 0 && stoneCmd?.subTaskID == GeologistTask.findGranite.rawValue)
-        #expect(diligentCmd?.actionType == 0 && diligentCmd?.subTaskID == GeologistTask.findGoldOre.rawValue)
     }
 
     @Test func autoGeologistLoopArmsNoPerUidTimer() async {
@@ -338,8 +303,8 @@ struct SpecialistDispatchCoordinatorTests {
             logger: MockLogger(),
             defaults: isolatedDefaults(),
             estimator: { _, _, _ in 60 })  // wouldn't fire even if it ran
-        coord.setGeologistLoopEnabled(true, subTypeId: 35)
-        await coord.lastGeologistLoopTasks[35]?.value
+        coord.autoGeologistLoopEnabled = true
+        await coord.lastAutoGeologistLoopTask?.value
 
         #expect(coord.pendingReDispatches.isEmpty)
     }
@@ -351,10 +316,8 @@ struct SpecialistDispatchCoordinatorTests {
             bulk: BulkDispatcher(interCallDelayNs: 0),
             logger: MockLogger(),
             defaults: defaults)
-        first.setGeologistLoopTask(.findMarble, subTypeId: 35)
-        first.setGeologistLoopEnabled(true, subTypeId: 35)
-        first.setGeologistLoopTask(.findGoldOre, subTypeId: 59)
-        first.setGeologistLoopEnabled(true, subTypeId: 59)
+        first.autoGeologistLoopTask = .findMarble
+        first.autoGeologistLoopEnabled = true
 
         let second = SpecialistDispatchCoordinator(
             store: SpecialistsStore(), dispatcher: CapturingDispatcher(),
@@ -362,10 +325,8 @@ struct SpecialistDispatchCoordinatorTests {
             logger: MockLogger(),
             defaults: defaults)
 
-        #expect(second.geologistLoopState(subTypeId: 35).enabled == true)
-        #expect(second.geologistLoopState(subTypeId: 35).task == .findMarble)
-        #expect(second.geologistLoopState(subTypeId: 59).enabled == true)
-        #expect(second.geologistLoopState(subTypeId: 59).task == .findGoldOre)
+        #expect(second.autoGeologistLoopEnabled == true)
+        #expect(second.autoGeologistLoopTask == .findMarble)
     }
 
     @Test func bulkDispatchAvailableTaskFires() async {
