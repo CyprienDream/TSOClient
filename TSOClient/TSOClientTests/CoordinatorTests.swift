@@ -19,6 +19,12 @@ private func makeItem(uid: String = "1:2", uid1: Int = 1, uid2: Int = 2,
     )
 }
 
+// Each coordinator persists auto-loop state in UserDefaults; give every test
+// a fresh suite so writes don't leak across tests or into the real domain.
+private func isolatedDefaults() -> UserDefaults {
+    UserDefaults(suiteName: "test-\(UUID().uuidString)")!
+}
+
 @Suite("SpecialistDispatchCoordinator")
 struct SpecialistDispatchCoordinatorTests {
 
@@ -30,7 +36,8 @@ struct SpecialistDispatchCoordinatorTests {
         let coord = SpecialistDispatchCoordinator(
             store: store, dispatcher: dispatcher,
             bulk: BulkDispatcher(interCallDelayNs: 0),
-            logger: MockLogger())
+            logger: MockLogger(),
+            defaults: isolatedDefaults())
 
         coord.dispatchOne(spec: spec, taskCode: TaskCode(actionType: 0, subTaskID: 3), targetGrid: 7)
 
@@ -52,7 +59,8 @@ struct SpecialistDispatchCoordinatorTests {
         let store = SpecialistsStore()
         let coord = SpecialistDispatchCoordinator(
             store: store, dispatcher: CapturingDispatcher(),
-            logger: MockLogger())
+            logger: MockLogger(),
+            defaults: isolatedDefaults())
         let geo = makeItem(kind: .geologist)
         let exp = makeItem(uid: "3:4", uid1: 3, uid2: 4, kind: .explorer)
 
@@ -67,7 +75,8 @@ struct SpecialistDispatchCoordinatorTests {
         store.items = [geo, exp]
         let coord = SpecialistDispatchCoordinator(
             store: store, dispatcher: CapturingDispatcher(),
-            logger: MockLogger())
+            logger: MockLogger(),
+            defaults: isolatedDefaults())
 
         let geoCode = GeologistTask.findCoal.taskCode
         coord.applyBulkTask(geoCode, to: .geologist)
@@ -87,13 +96,237 @@ struct SpecialistDispatchCoordinatorTests {
         let coord = SpecialistDispatchCoordinator(
             store: store, dispatcher: dispatcher,
             bulk: BulkDispatcher(interCallDelayNs: 0),
-            logger: logger)
+            logger: logger,
+            defaults: isolatedDefaults())
         coord.selectedTasks[exp.id] = ExplorerTask.treasureColada.taskCode
 
         await coord.bulkDispatch(idleSpecialists: [exp]).value
 
         #expect(dispatcher.sent.isEmpty)
         #expect(logger.messages.contains { $0.contains("firing 0 of 1") })
+    }
+
+    @Test func autoLoopOffIsNoOp() async {
+        let store = SpecialistsStore()
+        store.items = [makeItem(uid: "1:1", uid1: 1, uid2: 1, kind: .explorer)]
+        let dispatcher = CapturingDispatcher()
+        let coord = SpecialistDispatchCoordinator(
+            store: store, dispatcher: dispatcher,
+            bulk: BulkDispatcher(interCallDelayNs: 0),
+            logger: MockLogger(),
+            defaults: isolatedDefaults())
+
+        await coord.runAutoExplorerLoop()?.value
+
+        #expect(dispatcher.sent.isEmpty)
+    }
+
+    @Test func autoLoopFiresIdleExplorersAndSkipsBusy() async {
+        let store = SpecialistsStore()
+        let idleExp = makeItem(uid: "1:1", uid1: 1, uid2: 1, kind: .explorer)
+        let busyExp = makeItem(uid: "2:2", uid1: 2, uid2: 2, kind: .explorer, isIdle: false)
+        let idleGeo = makeItem(uid: "3:3", uid1: 3, uid2: 3, kind: .geologist)
+        store.items = [idleExp, busyExp, idleGeo]
+        let dispatcher = CapturingDispatcher()
+        let coord = SpecialistDispatchCoordinator(
+            store: store, dispatcher: dispatcher,
+            bulk: BulkDispatcher(interCallDelayNs: 0),
+            logger: MockLogger(),
+            defaults: isolatedDefaults())
+        coord.autoExplorerLoopTask = .treasureMedium
+        coord.autoExplorerLoopEnabled = true
+
+        // Setter kicked off an immediate sweep; await its completion.
+        await coord.lastAutoLoopTask?.value
+
+        #expect(dispatcher.sent.count == 1)
+        let cmd = dispatcher.sent[0] as? DispatchSpecialistCommand
+        #expect(cmd?.uid1 == 1 && cmd?.uid2 == 1)
+        #expect(cmd?.actionType == 1 && cmd?.subTaskID == 1)
+    }
+
+    @Test func autoLoopSkipsSkillGatedTask() async {
+        let store = SpecialistsStore()
+        // No skill 40 → cannot run treasureColada.
+        store.items = [makeItem(uid: "1:1", uid1: 1, uid2: 1, kind: .explorer, skills: [])]
+        let dispatcher = CapturingDispatcher()
+        let coord = SpecialistDispatchCoordinator(
+            store: store, dispatcher: dispatcher,
+            bulk: BulkDispatcher(interCallDelayNs: 0),
+            logger: MockLogger(),
+            defaults: isolatedDefaults())
+        coord.autoExplorerLoopTask = .treasureColada
+        coord.autoExplorerLoopEnabled = true
+
+        await coord.runAutoExplorerLoop()?.value
+
+        #expect(dispatcher.sent.isEmpty)
+    }
+
+    @Test func autoLoopSettingsPersistAcrossInstances() {
+        let defaults = isolatedDefaults()
+        let store = SpecialistsStore()
+
+        let first = SpecialistDispatchCoordinator(
+            store: store, dispatcher: CapturingDispatcher(),
+            bulk: BulkDispatcher(interCallDelayNs: 0),
+            logger: MockLogger(),
+            defaults: defaults)
+        first.autoExplorerLoopTask = .adventureLong
+        first.autoExplorerLoopEnabled = true
+
+        let second = SpecialistDispatchCoordinator(
+            store: SpecialistsStore(), dispatcher: CapturingDispatcher(),
+            bulk: BulkDispatcher(interCallDelayNs: 0),
+            logger: MockLogger(),
+            defaults: defaults)
+
+        #expect(second.autoExplorerLoopEnabled == true)
+        #expect(second.autoExplorerLoopTask == .adventureLong)
+    }
+
+    @Test func autoLoopArmsPerUidTimerWhenEnabled() async {
+        let store = SpecialistsStore()
+        store.items = [makeItem(uid: "1:1", uid1: 1, uid2: 1, kind: .explorer)]
+        let coord = SpecialistDispatchCoordinator(
+            store: store, dispatcher: CapturingDispatcher(),
+            bulk: BulkDispatcher(interCallDelayNs: 0),
+            logger: MockLogger(),
+            defaults: isolatedDefaults(),
+            estimator: { _, _, _ in 60 })   // never fires within the test window
+        coord.autoExplorerLoopEnabled = true
+        await coord.lastAutoLoopTask?.value
+
+        #expect(coord.pendingReDispatches["1:1"] != nil)
+    }
+
+    @Test func autoLoopReDispatchFiresAfterEstimateElapses() async {
+        let store = SpecialistsStore()
+        store.items = [makeItem(uid: "1:1", uid1: 1, uid2: 1, kind: .explorer)]
+        let dispatcher = CapturingDispatcher()
+        var calls = 0
+        // First arming returns 50ms (long enough to outlast the sweep's
+        // own 0-ns inter-call yield, short enough to keep the test snappy);
+        // second call returns nil so the wake doesn't re-arm and we don't
+        // loop indefinitely.
+        let coord = SpecialistDispatchCoordinator(
+            store: store, dispatcher: dispatcher,
+            bulk: BulkDispatcher(interCallDelayNs: 0),
+            logger: MockLogger(),
+            defaults: isolatedDefaults(),
+            estimator: { _, _, _ in
+                calls += 1
+                return calls == 1 ? 0.05 : nil
+            })
+        coord.autoReDispatchBuffer = 0
+        coord.autoExplorerLoopTask = .treasureMedium
+        coord.autoExplorerLoopEnabled = true
+        await coord.lastAutoLoopTask?.value
+        #expect(dispatcher.sent.count == 1)
+
+        let wake = coord.pendingReDispatches["1:1"]
+        await wake?.value
+
+        #expect(dispatcher.sent.count == 2)
+        let second = dispatcher.sent[1] as? DispatchSpecialistCommand
+        #expect(second?.actionType == 1 && second?.subTaskID == 1)  // treasureMedium
+        #expect(coord.pendingReDispatches.isEmpty)
+    }
+
+    @Test func autoLoopDisableCancelsPendingReDispatches() async {
+        let store = SpecialistsStore()
+        store.items = [makeItem(uid: "1:1", uid1: 1, uid2: 1, kind: .explorer)]
+        let coord = SpecialistDispatchCoordinator(
+            store: store, dispatcher: CapturingDispatcher(),
+            bulk: BulkDispatcher(interCallDelayNs: 0),
+            logger: MockLogger(),
+            defaults: isolatedDefaults(),
+            estimator: { _, _, _ in 60 })
+        coord.autoExplorerLoopEnabled = true
+        await coord.lastAutoLoopTask?.value
+        #expect(coord.pendingReDispatches.count == 1)
+
+        coord.autoExplorerLoopEnabled = false
+
+        #expect(coord.pendingReDispatches.isEmpty)
+    }
+
+    @Test func autoGeologistLoopOffIsNoOp() async {
+        let store = SpecialistsStore()
+        store.items = [makeItem(uid: "1:1", uid1: 1, uid2: 1,
+                                kind: .geologist, subTypeId: 35)]
+        let dispatcher = CapturingDispatcher()
+        let coord = SpecialistDispatchCoordinator(
+            store: store, dispatcher: dispatcher,
+            bulk: BulkDispatcher(interCallDelayNs: 0),
+            logger: MockLogger(),
+            defaults: isolatedDefaults())
+
+        await coord.runAutoGeologistLoop()?.value
+
+        #expect(dispatcher.sent.isEmpty)
+    }
+
+    @Test func autoGeologistLoopFiresOnlyStoneColdSubtype() async {
+        let store = SpecialistsStore()
+        let stoneCold = makeItem(uid: "1:1", uid1: 1, uid2: 1,
+                                 kind: .geologist, subTypeId: 35)
+        let jolly = makeItem(uid: "2:2", uid1: 2, uid2: 2,
+                             kind: .geologist, subTypeId: 5)
+        let busyStone = makeItem(uid: "3:3", uid1: 3, uid2: 3,
+                                 kind: .geologist, subTypeId: 35, isIdle: false)
+        store.items = [stoneCold, jolly, busyStone]
+        let dispatcher = CapturingDispatcher()
+        let coord = SpecialistDispatchCoordinator(
+            store: store, dispatcher: dispatcher,
+            bulk: BulkDispatcher(interCallDelayNs: 0),
+            logger: MockLogger(),
+            defaults: isolatedDefaults())
+        coord.autoGeologistLoopTask = .findStone
+        coord.autoGeologistLoopEnabled = true
+
+        await coord.lastAutoGeologistLoopTask?.value
+
+        #expect(dispatcher.sent.count == 1)
+        let cmd = dispatcher.sent[0] as? DispatchSpecialistCommand
+        #expect(cmd?.uid1 == 1 && cmd?.uid2 == 1)
+        #expect(cmd?.actionType == 0 && cmd?.subTaskID == 0)
+    }
+
+    @Test func autoGeologistLoopArmsNoPerUidTimer() async {
+        let store = SpecialistsStore()
+        store.items = [makeItem(uid: "1:1", uid1: 1, uid2: 1,
+                                kind: .geologist, subTypeId: 35)]
+        let coord = SpecialistDispatchCoordinator(
+            store: store, dispatcher: CapturingDispatcher(),
+            bulk: BulkDispatcher(interCallDelayNs: 0),
+            logger: MockLogger(),
+            defaults: isolatedDefaults(),
+            estimator: { _, _, _ in 60 })  // wouldn't fire even if it ran
+        coord.autoGeologistLoopEnabled = true
+        await coord.lastAutoGeologistLoopTask?.value
+
+        #expect(coord.pendingReDispatches.isEmpty)
+    }
+
+    @Test func autoGeologistLoopSettingsPersistAcrossInstances() {
+        let defaults = isolatedDefaults()
+        let first = SpecialistDispatchCoordinator(
+            store: SpecialistsStore(), dispatcher: CapturingDispatcher(),
+            bulk: BulkDispatcher(interCallDelayNs: 0),
+            logger: MockLogger(),
+            defaults: defaults)
+        first.autoGeologistLoopTask = .findMarble
+        first.autoGeologistLoopEnabled = true
+
+        let second = SpecialistDispatchCoordinator(
+            store: SpecialistsStore(), dispatcher: CapturingDispatcher(),
+            bulk: BulkDispatcher(interCallDelayNs: 0),
+            logger: MockLogger(),
+            defaults: defaults)
+
+        #expect(second.autoGeologistLoopEnabled == true)
+        #expect(second.autoGeologistLoopTask == .findMarble)
     }
 
     @Test func bulkDispatchAvailableTaskFires() async {
@@ -104,7 +337,8 @@ struct SpecialistDispatchCoordinatorTests {
         let coord = SpecialistDispatchCoordinator(
             store: store, dispatcher: dispatcher,
             bulk: BulkDispatcher(interCallDelayNs: 0),
-            logger: MockLogger())
+            logger: MockLogger(),
+            defaults: isolatedDefaults())
 
         await coord.bulkDispatch(idleSpecialists: [geo]).value
 

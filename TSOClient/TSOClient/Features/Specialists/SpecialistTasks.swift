@@ -57,7 +57,7 @@ enum GeologistTask: Int, CaseIterable, Identifiable {
 // Treasures: actionType=1, subTaskID=0..6.
 // Adventures: actionType=2, subTaskID=0..3.
 // requiredSkillID encodes the Explorer skill needed (39=Artefact, 40=BeanACollada).
-enum ExplorerTask: CaseIterable, Identifiable {
+enum ExplorerTask: String, CaseIterable, Identifiable {
     case treasureShort, treasureMedium, treasureLong, treasureVeryLong
     case treasureLongest, treasureErudite, treasureColada
     case adventureShort, adventureMedium, adventureLong, adventureVeryLong

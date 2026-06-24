@@ -85,3 +85,30 @@ struct BuffCategoryClassifierTests {
         #expect(!empty.isBuildingBuff("RemoveBuff"))
     }
 }
+
+@Suite("ExplorerDurationRegistry")
+struct ExplorerDurationRegistryTests {
+    // Basic explorer (subTypeId 1, bonus=100), no skills, treasureShort (1,0)
+    // base=21600s. Without PFB → 21600s. With PFB → 21600 * 0.8 = 17280s.
+    @Test func pfbReducesEstimateBy20Percent() {
+        let code = TaskCode(actionType: 1, subTaskID: 0)
+        let unbuffed = ExplorerDurationRegistry.estimate(
+            task: code, subTypeId: 1, skills: [], pfbActive: false)
+        let buffed = ExplorerDurationRegistry.estimate(
+            task: code, subTypeId: 1, skills: [], pfbActive: true)
+        #expect(unbuffed == 21600)
+        #expect(buffed != nil)
+        #expect(abs((buffed ?? 0) - 17280) < 0.0001)
+    }
+
+    @Test func pfbStacksMultiplicativelyWithSkillReduction() {
+        // Pathfinder (skillId=36) level 3 → 15% reduction across all tasks.
+        // treasureShort base 21600 × 0.85 = 18360, then × 0.8 PFB = 14688.
+        let code = TaskCode(actionType: 1, subTaskID: 0)
+        let skills = [SpecialistSkill(id: 36, level: 3)]
+        let buffed = ExplorerDurationRegistry.estimate(
+            task: code, subTypeId: 1, skills: skills, pfbActive: true)
+        #expect(buffed != nil)
+        #expect(abs((buffed ?? 0) - 14688) < 0.0001)
+    }
+}

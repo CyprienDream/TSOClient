@@ -40,6 +40,7 @@ final class SpecialistDurationLearner {
 
     func process(payload: InboundMessage.SpecialistsPayload,
                  formatter: SpecialistDisplayFormatter,
+                 pfbActive: Bool = false,
                  now: Date = Date()) {
         let nextUids = Set(payload.items.map { $0.uid })
 
@@ -50,9 +51,9 @@ final class SpecialistDurationLearner {
 
         for item in payload.items {
             if !item.isIdle {
-                applyBusyTransition(item: item, formatter: formatter, now: now)
+                applyBusyTransition(item: item, formatter: formatter, pfbActive: pfbActive, now: now)
             } else {
-                applyIdleTransition(item: item, formatter: formatter, now: now)
+                applyIdleTransition(item: item, formatter: formatter, pfbActive: pfbActive, now: now)
             }
         }
 
@@ -87,6 +88,7 @@ final class SpecialistDurationLearner {
 
     private func applyBusyTransition(item: InboundMessage.SpecialistsPayload.Item,
                                      formatter: SpecialistDisplayFormatter,
+                                     pfbActive: Bool,
                                      now: Date) {
         // Non-explorer subtypes have no bonus in the registry — default to 100
         // (no scaling) which keeps the current geologist/general behavior.
@@ -109,11 +111,13 @@ final class SpecialistDurationLearner {
             lastCt: ct,
             lastCtAt: now
         )
-        logBusy(item: item, ct: ct, actionType: at, subTaskId: st, bonus: bonus, formatter: formatter)
+        logBusy(item: item, ct: ct, actionType: at, subTaskId: st, bonus: bonus,
+                pfbActive: pfbActive, formatter: formatter)
     }
 
     private func applyIdleTransition(item: InboundMessage.SpecialistsPayload.Item,
                                      formatter: SpecialistDisplayFormatter,
+                                     pfbActive: Bool,
                                      now: Date) {
         if let snap = busySnapshots[item.uid] {
             let totalRealMs: Int = {
@@ -124,7 +128,7 @@ final class SpecialistDurationLearner {
             }()
             let key = "\(snap.subTypeId):\(snap.actionType):\(snap.subTaskId)"
             persistDuration(key: key, value: totalRealMs)
-            logDivergence(snap: snap, observedMs: totalRealMs, skills: item.skills)
+            logDivergence(snap: snap, observedMs: totalRealMs, skills: item.skills, pfbActive: pfbActive)
         }
         taskStartedAt.removeValue(forKey: item.uid)
         busySnapshots.removeValue(forKey: item.uid)
@@ -146,6 +150,7 @@ final class SpecialistDurationLearner {
 
     private func logBusy(item: InboundMessage.SpecialistsPayload.Item,
                          ct: Int, actionType: Int, subTaskId: Int, bonus: Int,
+                         pfbActive: Bool,
                          formatter: SpecialistDisplayFormatter) {
         guard let prefix = Self.logPrefix(for: item.specialistType) else { return }
         let code = TaskCode(actionType: actionType, subTaskID: subTaskId)
@@ -153,7 +158,7 @@ final class SpecialistDurationLearner {
         let realElapsedS = Double(ct) / 1000.0 * 100.0 / Double(bonus)
         let name = formatter.compactDisplayName(forPayloadItem: item)
         if let predicted = ExplorerDurationRegistry.estimate(
-            task: code, subTypeId: item.subTypeId, skills: item.skills) {
+            task: code, subTypeId: item.subTypeId, skills: item.skills, pfbActive: pfbActive) {
             let remainingS = max(0, predicted - realElapsedS)
             logger.log("[\(prefix)] busy \"\(name)\" uid=\(item.uid) type=\(item.subTypeId) " +
                        "task=\(actionType),\(subTaskId) skills=[\(skillStr)] " +
@@ -174,13 +179,14 @@ final class SpecialistDurationLearner {
         logger.log("[\(prefix)] idle \"\(name)\" uid=\(item.uid) type=\(item.subTypeId) skills=[\(skillStr)]")
     }
 
-    private func logDivergence(snap: BusySnapshot, observedMs: Int, skills: [SpecialistSkill]) {
+    private func logDivergence(snap: BusySnapshot, observedMs: Int,
+                               skills: [SpecialistSkill], pfbActive: Bool) {
         // Surface table errors: predicted vs observed should agree closely.
         // >5% divergence usually means a wrong timeBonus, a missing skill
         // mapping, or a missing base duration entry.
         let code = TaskCode(actionType: snap.actionType, subTaskID: snap.subTaskId)
         guard let predicted = ExplorerDurationRegistry.estimate(
-            task: code, subTypeId: snap.subTypeId, skills: skills) else { return }
+            task: code, subTypeId: snap.subTypeId, skills: skills, pfbActive: pfbActive) else { return }
         let observedSec = Double(observedMs) / 1000.0
         let delta = abs(predicted - observedSec) / observedSec
         guard delta > 0.05 else { return }

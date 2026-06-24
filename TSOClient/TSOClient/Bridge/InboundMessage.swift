@@ -35,6 +35,12 @@ enum InboundMessage {
         }
     }
 
+    // Auto-detected player-wide buff status. Currently only PFB; expanded
+    // as more zone-wide buffs (e.g. Premium Time) get wired up.
+    struct PlayerBuffsPayload: Decodable {
+        let pfbActive: Bool
+    }
+
     struct BuffsPayload: Decodable {
         let items: [Item]
 

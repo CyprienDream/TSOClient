@@ -7,6 +7,7 @@ struct SpecialistRow: View {
     let playerLevel: Int?
     let taskStartedAt: Date?
     let learnedDurations: [String: Int]
+    let pfbActive: Bool
     @Binding var taskCode: TaskCode
     @Binding var targetGrid: Int
     var onDispatch: (TaskCode, Int) -> Void
@@ -54,7 +55,8 @@ struct SpecialistRow: View {
                     task: TaskCode(actionType: spec.taskActionType ?? -1,
                                    subTaskID: spec.taskSubTaskId ?? -1),
                     subTypeId: spec.subTypeId,
-                    skills: spec.skills) {
+                    skills: spec.skills,
+                    pfbActive: pfbActive) {
                     return est
                 }
                 if let key = spec.durationKey, let learnedMs = learnedDurations[key] {
@@ -148,7 +150,8 @@ struct SpecialistRow: View {
 
     private func labelWithEstimate(_ t: ExplorerTask) -> String {
         guard let est = ExplorerDurationRegistry.estimate(
-            task: t.taskCode, subTypeId: spec.subTypeId, skills: spec.skills)
+            task: t.taskCode, subTypeId: spec.subTypeId, skills: spec.skills,
+            pfbActive: pfbActive)
         else { return t.label }
         return "\(t.label) — \(DurationFormatter.format(est))"
     }
