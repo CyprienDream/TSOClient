@@ -124,7 +124,7 @@ TSOClient/                      ← Xcode project root
   TSOClientTests/               ← Swift Testing suites (@Suite / @Test); see "Testing & CI" below
 .github/
   workflows/
-    ci.yml                      ← PR pipeline: builds the app and runs the test suite on macos-15
+    ci.yml                      ← PR pipeline: builds the app and runs the test suite on macos-26
 ```
 
 ## Architecture in one paragraph
@@ -333,7 +333,7 @@ What was tried:
              -destination 'platform=macOS' \
              test
   ```
-- **CI**: `.github/workflows/ci.yml` runs on every `pull_request` event (push to any branch with an open PR). Single `build-and-test` job on `macos-15`: ad-hoc signs (`CODE_SIGN_IDENTITY=-`, `CODE_SIGNING_REQUIRED=NO`), then runs `xcodebuild build` followed by `xcodebuild test`. `concurrency` cancels superseded runs on the same PR branch.
+- **CI**: `.github/workflows/ci.yml` runs on every `pull_request` event (push to any branch with an open PR). Single `build-and-test` job on `macos-26`: ad-hoc signs (`CODE_SIGN_IDENTITY=-`, `CODE_SIGNING_REQUIRED=NO`), then runs `xcodebuild build` followed by `xcodebuild test`. `concurrency` cancels superseded runs on the same PR branch.
 - **Branch protection** (must be configured in GitHub UI, not in YAML): require status check `Build & Test` on `main` to block merges on red CI.
 
 ## What does NOT exist yet
