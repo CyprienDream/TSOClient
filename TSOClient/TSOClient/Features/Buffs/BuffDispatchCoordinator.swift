@@ -109,9 +109,29 @@ final class BuffDispatchCoordinator {
         }
     }
 
+    // Dispatch each group's own `selectedBuff` to its buildings. Groups
+    // without a selection (or whose selection is missing from inventory) are
+    // skipped. Returns nil if nothing is dispatchable.
     @discardableResult
-    func buffAllGroups(snapshot: [(category: BuildingCategory, buildings: [BuildingsStore.BuildingItem])],
-                       buffName: String) -> Task<Void, Never>? {
-        buffAll(group: snapshot.flatMap { $0.buildings }, buffName: buffName)
+    func buffAllGroups(snapshot: [(category: BuildingCategory, buildings: [BuildingsStore.BuildingItem])]) -> Task<Void, Never>? {
+        struct Step { let building: BuildingsStore.BuildingItem; let buff: BuffsStore.BuffItem }
+        var steps: [Step] = []
+        for group in snapshot {
+            let name = selectedBuff[group.category.id] ?? ""
+            guard !name.isEmpty, let buff = buffsStore.item(for: name) else { continue }
+            for b in group.buildings {
+                steps.append(Step(building: b, buff: buff))
+            }
+        }
+        guard !steps.isEmpty else { return nil }
+        let total = steps.count
+        return bulk.run(items: steps) { [self] i, step in
+            logger.log("[BuffAll] \(i + 1)/\(total) grid=\(step.building.gridIndex) " +
+                       "buff=\(step.buff.uid1):\(step.buff.uid2)")
+            dispatcher.dispatchBuff(
+                buffUid1: step.buff.uid1,
+                buffUid2: step.buff.uid2,
+                targetGrid: step.building.gridIndex)
+        }
     }
 }
