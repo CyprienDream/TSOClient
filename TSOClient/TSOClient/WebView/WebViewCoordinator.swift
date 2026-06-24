@@ -6,9 +6,9 @@ final class WebViewCoordinator: NSObject, WKUIDelegate, WKNavigationDelegate, WK
     private let logger: Logger
     weak var webView: WKWebView?
 
-    init(env: AppEnvironment) {
-        self.inbound = env.inbound
-        self.logger = env.logger
+    init(inbound: InboundDispatcher, logger: Logger) {
+        self.inbound = inbound
+        self.logger = logger
     }
 
     // Open target="_blank" links inside the same view.

@@ -12,14 +12,14 @@ final class BuffDispatchCoordinator {
 
     private let buffsStore: BuffsStore
     private let buildingsStore: BuildingsStore
-    private let dispatcher: OutboundDispatching
+    private let dispatcher: BuffDispatchPort
     private let classifier: BuffCategoryClassifier
     private let bulk: BulkDispatcher
     private let logger: Logger
 
     init(buffsStore: BuffsStore,
          buildingsStore: BuildingsStore,
-         dispatcher: OutboundDispatching,
+         dispatcher: BuffDispatchPort,
          classifier: BuffCategoryClassifier = .default,
          bulk: BulkDispatcher = .default,
          logger: Logger = ConsoleLogger()) {
@@ -99,10 +99,10 @@ final class BuffDispatchCoordinator {
         return bulk.run(items: group) { [self] i, building in
             logger.log("[BuffAll] \(i + 1)/\(group.count) grid=\(building.gridIndex) " +
                        "buff=\(buff.uid1):\(buff.uid2)")
-            dispatcher.send(DispatchBuffCommand(
+            dispatcher.dispatchBuff(
                 buffUid1: buff.uid1,
                 buffUid2: buff.uid2,
-                targetGrid: building.gridIndex))
+                targetGrid: building.gridIndex)
         }
     }
 

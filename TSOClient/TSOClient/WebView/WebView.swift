@@ -3,7 +3,13 @@ import WebKit
 
 struct WebView: NSViewRepresentable {
     let url: URL
-    var env: AppEnvironment
+    // Narrow injection: WebView only needs to (a) hand the WKWebView to the
+    // Swift→JS sender and (b) construct a coordinator that routes inbound
+    // messages. Passing `AppEnvironment` whole coupled the view to every
+    // store field, including ones it never touches.
+    let bridge: BridgeSender
+    let inbound: InboundDispatcher
+    let logger: Logger
 
     func makeNSView(context: Context) -> WKWebView {
         let config = WKWebViewConfiguration()
@@ -25,7 +31,7 @@ struct WebView: NSViewRepresentable {
 
         webView.isInspectable = true
         context.coordinator.webView = webView
-        env.sender.webView = webView  // Assign before any UI can trigger a dispatch.
+        bridge.webView = webView  // Assign before any UI can trigger a dispatch.
         return webView
     }
 
@@ -36,6 +42,6 @@ struct WebView: NSViewRepresentable {
     }
 
     func makeCoordinator() -> WebViewCoordinator {
-        WebViewCoordinator(env: env)
+        WebViewCoordinator(inbound: inbound, logger: logger)
     }
 }

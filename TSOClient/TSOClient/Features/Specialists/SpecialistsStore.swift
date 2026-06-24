@@ -17,10 +17,6 @@ final class SpecialistsStore {
     let formatter: SpecialistDisplayFormatter
     let learner: SpecialistDurationLearner
 
-    // Convenience pass-throughs so existing call sites (panel, row) keep working.
-    var taskStartedAt: [String: Date] { learner.taskStartedAt }
-    var learnedDurations: [String: Int] { learner.learnedDurations }
-
     init(formatter: SpecialistDisplayFormatter = SpecialistDisplayFormatter(),
          learner: SpecialistDurationLearner = SpecialistDurationLearner()) {
         self.formatter = formatter
