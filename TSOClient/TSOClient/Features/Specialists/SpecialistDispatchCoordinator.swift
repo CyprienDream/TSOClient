@@ -39,28 +39,48 @@ final class SpecialistDispatchCoordinator {
     private(set) var lastAutoLoopTask: Task<Void, Never>?
     private(set) var pendingReDispatches: [String: Task<Void, Never>] = [:]
 
-    // Geologist auto-loop. Limited to Stone Cold (subTypeId=35) for now,
-    // and zone-refresh-only (no per-uid timer) — geologist task durations
-    // aren't reliable enough yet to predict completion.
-    var autoGeologistLoopEnabled: Bool = false {
-        didSet {
-            defaults.set(autoGeologistLoopEnabled, forKey: Keys.autoGeologistLoopEnabled)
-            if autoGeologistLoopEnabled, !oldValue {
-                lastAutoGeologistLoopTask = runAutoGeologistLoop()
-            }
+    // Geologist auto-loops, keyed by subTypeId. Each enabled entry sweeps its
+    // own subtype on its own task — so Stone Cold can loop Granite while
+    // Diligent loops Gold. Zone-refresh-only (no per-uid timer) — geologist
+    // task durations aren't reliable enough yet to predict completion.
+    struct GeologistLoopState: Equatable {
+        var enabled: Bool = false
+        var task: GeologistTask = .findStone
+    }
+    private(set) var geologistLoops: [Int: GeologistLoopState] = [:]
+    private(set) var lastGeologistLoopTasks: [Int: Task<Void, Never>] = [:]
+
+    func geologistLoopState(subTypeId: Int) -> GeologistLoopState {
+        geologistLoops[subTypeId] ?? GeologistLoopState()
+    }
+
+    func setGeologistLoopEnabled(_ enabled: Bool, subTypeId: Int) {
+        var state = geologistLoopState(subTypeId: subTypeId)
+        let was = state.enabled
+        state.enabled = enabled
+        geologistLoops[subTypeId] = state
+        defaults.set(enabled, forKey: Keys.geologistLoopEnabled(subTypeId: subTypeId))
+        if enabled, !was {
+            lastGeologistLoopTasks[subTypeId] = runAutoGeologistLoop(subTypeId: subTypeId)
         }
     }
-    var autoGeologistLoopTask: GeologistTask = .findStone {
-        didSet { defaults.set(autoGeologistLoopTask.rawValue, forKey: Keys.autoGeologistLoopTask) }
+
+    func setGeologistLoopTask(_ task: GeologistTask, subTypeId: Int) {
+        var state = geologistLoopState(subTypeId: subTypeId)
+        state.task = task
+        geologistLoops[subTypeId] = state
+        defaults.set(task.rawValue, forKey: Keys.geologistLoopTask(subTypeId: subTypeId))
     }
-    private(set) var lastAutoGeologistLoopTask: Task<Void, Never>?
-    private static let stoneColdGeologistSubTypeID = 35
 
     private enum Keys {
         static let autoExplorerLoopEnabled  = "specialists.autoExplorerLoopEnabled"
         static let autoExplorerLoopTask     = "specialists.autoExplorerLoopTask"
-        static let autoGeologistLoopEnabled = "specialists.autoGeologistLoopEnabled"
-        static let autoGeologistLoopTask    = "specialists.autoGeologistLoopTask"
+        static func geologistLoopEnabled(subTypeId: Int) -> String {
+            "specialists.geologistLoop.\(subTypeId).enabled"
+        }
+        static func geologistLoopTask(subTypeId: Int) -> String {
+            "specialists.geologistLoop.\(subTypeId).task"
+        }
     }
 
     private let store: SpecialistsStore
@@ -91,10 +111,14 @@ final class SpecialistDispatchCoordinator {
            let task = ExplorerTask(rawValue: raw) {
             self.autoExplorerLoopTask = task
         }
-        self.autoGeologistLoopEnabled = defaults.bool(forKey: Keys.autoGeologistLoopEnabled)
-        if let raw = defaults.object(forKey: Keys.autoGeologistLoopTask) as? Int,
-           let task = GeologistTask(rawValue: raw) {
-            self.autoGeologistLoopTask = task
+        for sub in GeologistAutoLoopSubtype.supported {
+            var state = GeologistLoopState()
+            state.enabled = defaults.bool(forKey: Keys.geologistLoopEnabled(subTypeId: sub.subTypeId))
+            if let raw = defaults.object(forKey: Keys.geologistLoopTask(subTypeId: sub.subTypeId)) as? Int,
+               let task = GeologistTask(rawValue: raw) {
+                state.task = task
+            }
+            self.geologistLoops[sub.subTypeId] = state
         }
     }
 
@@ -186,23 +210,34 @@ final class SpecialistDispatchCoordinator {
         }
     }
 
-    // Geologist counterpart to runAutoExplorerLoop. Scoped to Stone Cold
-    // (subTypeId=35) until we have enough data to estimate other subtypes
-    // reliably. No per-uid timer — relies on the next SPECIALISTS payload
-    // (typically a zone reload) to re-fire.
+    // Geologist counterpart to runAutoExplorerLoop. Runs every enabled
+    // per-subtype loop (Stone Cold, Diligent, …). No per-uid timer —
+    // relies on the next SPECIALISTS payload (typically a zone reload) to
+    // re-fire, because geologist task durations aren't reliable enough yet
+    // to predict completion.
+    func runAutoGeologistLoop() {
+        for sub in GeologistAutoLoopSubtype.supported {
+            if let t = runAutoGeologistLoop(subTypeId: sub.subTypeId) {
+                lastGeologistLoopTasks[sub.subTypeId] = t
+            }
+        }
+    }
+
     @discardableResult
-    func runAutoGeologistLoop() -> Task<Void, Never>? {
-        guard autoGeologistLoopEnabled else { return nil }
-        let task = autoGeologistLoopTask
+    func runAutoGeologistLoop(subTypeId: Int) -> Task<Void, Never>? {
+        let state = geologistLoopState(subTypeId: subTypeId)
+        guard state.enabled else { return nil }
+        let task = state.task
         let code = task.taskCode
         let candidates = store.items.filter {
             $0.specialistType == .geologist &&
-            $0.subTypeId == Self.stoneColdGeologistSubTypeID &&
+            $0.subTypeId == subTypeId &&
             $0.isIdle &&
             task.isAvailable(playerLevel: store.playerLevel)
         }
         guard !candidates.isEmpty else { return nil }
-        logger.log("[AutoLoop] dispatching \(candidates.count) idle Stone Cold geologist(s) to \(task.label)")
+        let label = GeologistAutoLoopSubtype.label(forSubTypeId: subTypeId)
+        logger.log("[AutoLoop] dispatching \(candidates.count) idle \(label) geologist(s) to \(task.label)")
         let plan = candidates.map { ($0, code, 0) }
         return bulk.run(items: plan) { [self] i, item in
             let (spec, tc, grid) = item

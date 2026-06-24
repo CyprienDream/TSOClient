@@ -292,7 +292,7 @@
         for (var i = 0; i < keys.length; i++) {
             var k = keys[i];
             if (k === '__class') continue;
-            webkit.messageHandlers.logger.postMessage(
+            window._tsoDiagLog(
                 '[PFB:rootkey] ' + rootCls + '.' + k + ' = ' + summarizeField(root[k])
             );
         }
@@ -327,7 +327,7 @@
             if (buffClasses.length > 0) {
                 _pfbDumpedBuffClasses = true;
                 buffClasses.sort();
-                webkit.messageHandlers.logger.postMessage(
+                window._tsoDiagLog(
                     '[PFB:buffclasses] ' + buffClasses.join(', ')
                 );
             }
@@ -372,7 +372,7 @@
                 var alreadyLogged = !!_pfbVecLoggedFields[dedupKey];
                 if (!alreadyLogged || hits > 0) {
                     _pfbVecLoggedFields[dedupKey] = true;
-                    webkit.messageHandlers.logger.postMessage(
+                    window._tsoDiagLog(
                         '[PFB:vec] ' + dedupKey +
                         ' total=' + list.length +
                         ' pfbHits=' + hits +
@@ -381,7 +381,7 @@
                         ' first.name=' + first.buffName_string
                     );
                     if (sampleHit) {
-                        webkit.messageHandlers.logger.postMessage(
+                        window._tsoDiagLog(
                             '[PFB:vec.sample] ' + dedupKey + ' ' +
                             JSON.stringify(sampleHit).slice(0, 600)
                         );
@@ -418,7 +418,7 @@
                 if (!_pfbDumpedAllAppliances) {
                     _pfbDumpedAllAppliances = true;
                     for (var di = 0; di < list.length; di++) {
-                        webkit.messageHandlers.logger.postMessage(
+                        window._tsoDiagLog(
                             '[PFB:appliance.all] ' + rootCls + '.' + k +
                             '[' + di + '] = ' + JSON.stringify(list[di]).slice(0, 800)
                         );
@@ -435,7 +435,7 @@
                         pfbAppliances++;
                         pfbActive = true;
                         if (!pfbFromField) pfbFromField = rootCls + '.' + k;
-                        webkit.messageHandlers.logger.postMessage(
+                        window._tsoDiagLog(
                             '[PFB:appliance.hit] ' + rootCls + '.' + k +
                             '[' + li + '] buffID=' + id +
                             ' variant=' + PFB_BUFF_IDS[id] +
@@ -556,7 +556,7 @@
                         var sr = (body.__class && body.__class.indexOf('dServerResponse') >= 0) ? body : null;
                         if (!sr && body.data && body.data.__class && body.data.__class.indexOf('dServerResponse') >= 0) sr = body.data;
                         if (!sr) return;
-                        webkit.messageHandlers.logger.postMessage(
+                        window._tsoDiagLog(
                             '[AMF3:' + channel + '] ack type=' + sr.type +
                             ' errorCode=' + (sr.data && sr.data.errorCode) +
                             ' full=' + JSON.stringify(sr, null, 2).slice(0, 1500));
@@ -727,7 +727,7 @@
                         if (typeof v === 'object') return k + '={' + Object.keys(v).slice(0,6).join(',') + '}';
                         return k + '=' + v;
                     }).join(' ');
-                    webkit.messageHandlers.logger.postMessage(
+                    window._tsoDiagLog(
                         '[AMF3:spec:timing] ' + _label + ' uid=' + uk +
                         ' serverClock=' + ctx.serverClock + ' | ' + _taskFields);
                 }
@@ -756,7 +756,7 @@
                     playerLevel: (typeof window._tsoPlayerLevel === 'number') ? window._tsoPlayerLevel : null,
                     serverTime: (window._tsoServerClock && window._tsoServerClock.serverTime) || null,
                 });
-                webkit.messageHandlers.logger.postMessage(
+                window._tsoDiagLog(
                     '[AMF3:' + channel + '] specialists=' + specItems.length +
                     ' level=' + (window._tsoPlayerLevel != null ? window._tsoPlayerLevel : '?'));
                 // Diagnostic: surface premium variants whose numeric specialistType isn't
@@ -804,7 +804,7 @@
                         if (typeof bv === 'object') return k + '={cls:' + (bv.__class || '?') + '}';
                         return k + '=' + bv;
                     }).join(' | ');
-                    webkit.messageHandlers.logger.postMessage(
+                    window._tsoDiagLog(
                         '[AMF3:bldg:exemplar] skin=' + bSkin + ' | ' + bFields);
                     loggedExemplar = true;
                 }
@@ -816,7 +816,7 @@
                     if (bf0 && typeof bf0.buffName_string === 'string') {
                         activeBuff = bf0.buffName_string;
                     } else if (!loggedExemplar) {
-                        webkit.messageHandlers.logger.postMessage(
+                        window._tsoDiagLog(
                             '[AMF3:bldg:buff] ' + JSON.stringify(bf0, null, 2).slice(0, 300));
                     }
                 }
@@ -840,7 +840,7 @@
                 var skinSummary = Object.keys(skinCounts).sort().map(function(k) {
                     return k + ' x' + skinCounts[k];
                 }).join('\n  ');
-                webkit.messageHandlers.logger.postMessage(
+                window._tsoDiagLog(
                     '[AMF3:buildings] total=' + buildingItems.length + '\n  ' + skinSummary);
             }
         }
@@ -875,7 +875,7 @@
                 var buffSummary = Object.keys(buffCounts).sort().map(function(k) {
                     return k + ' x' + buffCounts[k];
                 }).join(', ');
-                webkit.messageHandlers.logger.postMessage(
+                window._tsoDiagLog(
                     '[AMF3:buffs] total=' + buffItems.length + ' | ' + buffSummary);
             }
         }
@@ -890,7 +890,7 @@
             var scan = scanForPlayerBuffs(ctx);
             for (var ti = 0; ti < ctx.treePfbHits.length && ti < 5; ti++) {
                 var h = ctx.treePfbHits[ti];
-                webkit.messageHandlers.logger.postMessage(
+                window._tsoDiagLog(
                     '[PFB:tree] cls=' + h.cls +
                     ' name=' + h.name +
                     ' parent=' + h.parentCls +
@@ -899,7 +899,7 @@
                     ' endTime=' + h.endTime
                 );
             }
-            webkit.messageHandlers.logger.postMessage(
+            window._tsoDiagLog(
                 '[PFB:summary] active=' + scan.pfbActive +
                 ' vectorsScanned=' + scan.vectorsSeen +
                 ' hitsInVectors=' + scan.pfbHits +
