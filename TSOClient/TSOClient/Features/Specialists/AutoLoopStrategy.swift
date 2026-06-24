@@ -53,7 +53,7 @@ struct ExplorerAutoLoopStrategy: AutoLoopStrategy {
     let isEnabled: () -> Bool
     let currentTask: () -> ExplorerTask
     let buffer: () -> TimeInterval
-    let estimator: (SpecialistItem, TaskCode, Bool) -> TimeInterval?
+    let estimator: DurationEstimator
 
     var logLabel: String { "explorer" }
     var taskLogLabel: String { currentTask().label }
@@ -69,7 +69,9 @@ struct ExplorerAutoLoopStrategy: AutoLoopStrategy {
                          taskCode: TaskCode,
                          pfbActive: Bool) -> TimeInterval? {
         guard isEnabled(), spec.specialistType == .explorer,
-              let est = estimator(spec, taskCode, pfbActive) else { return nil }
+              let est = estimator.estimate(task: taskCode, subTypeId: spec.subTypeId,
+                                           skills: spec.skills, pfbActive: pfbActive)
+        else { return nil }
         return est + buffer()
     }
 }

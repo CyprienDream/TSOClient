@@ -15,6 +15,10 @@ struct SpecialistRow: View {
     @Binding var taskCode: TaskCode
     @Binding var targetGrid: Int
     var onDispatch: (TaskCode, Int) -> Void
+    // Injected so previews/tests can substitute task-duration data; the
+    // panel passes its store.learner's estimator (production default is
+    // RegistryDurationEstimator).
+    var estimator: DurationEstimator = RegistryDurationEstimator()
 
     @State private var gridText: String = "0"
 
@@ -67,7 +71,7 @@ struct SpecialistRow: View {
             // Fall back to learnedDurations for non-Explorer specialists. Fall back to
             // elapsed (orange) if neither source has data.
             let predicted: Double? = {
-                if let est = ExplorerDurationRegistry.estimate(
+                if let est = estimator.estimate(
                     task: TaskCode(actionType: spec.taskActionType ?? -1,
                                    subTaskID: spec.taskSubTaskId ?? -1),
                     subTypeId: spec.subTypeId,
@@ -165,7 +169,7 @@ struct SpecialistRow: View {
     }
 
     private func labelWithEstimate(_ t: ExplorerTask) -> String {
-        guard let est = ExplorerDurationRegistry.estimate(
+        guard let est = estimator.estimate(
             task: t.taskCode, subTypeId: spec.subTypeId, skills: spec.skills,
             pfbActive: pfbActive)
         else { return t.label }
