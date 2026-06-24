@@ -84,7 +84,7 @@ final class SpecialistDispatchCoordinator {
     }
 
     private let store: SpecialistsStore
-    private let dispatcher: OutboundDispatching
+    private let dispatcher: SpecialistDispatchPort
     private let bulk: BulkDispatcher
     private let logger: Logger
     private let defaults: UserDefaults
@@ -95,7 +95,7 @@ final class SpecialistDispatchCoordinator {
     private var strategies: [String: any AutoLoopStrategy] = [:]
 
     init(store: SpecialistsStore,
-         dispatcher: OutboundDispatching,
+         dispatcher: SpecialistDispatchPort,
          bulk: BulkDispatcher = .default,
          logger: Logger = ConsoleLogger(),
          defaults: UserDefaults = .standard,
@@ -175,11 +175,11 @@ final class SpecialistDispatchCoordinator {
         store.markDispatched(uid: spec.id,
                              actionType: taskCode.actionType,
                              subTaskId: taskCode.subTaskID)
-        dispatcher.send(DispatchSpecialistCommand(
+        dispatcher.dispatchSpecialist(
             uid1: spec.uid1, uid2: spec.uid2,
             actionType: taskCode.actionType,
             subTaskID: taskCode.subTaskID,
-            targetGrid: targetGrid))
+            targetGrid: targetGrid)
         scheduleAutoReDispatch(spec: spec, taskCode: taskCode)
     }
 
