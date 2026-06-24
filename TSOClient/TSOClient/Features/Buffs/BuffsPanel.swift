@@ -86,8 +86,6 @@ struct BuffsPanel: View {
         let label = coordinator.masterBuff.isEmpty
             ? "— select buff —"
             : (buffs.first { $0.buffName == coordinator.masterBuff }?.displayLabel ?? coordinator.masterBuff)
-        let canBuffAll = !coordinator.masterBuff.isEmpty
-            && buffsStore.totalAmount(for: coordinator.masterBuff) > 0
         let totalBuildings = snapshot.reduce(0) { $0 + $1.buildings.count }
         return VStack(alignment: .leading, spacing: 4) {
             HStack {
@@ -114,11 +112,10 @@ struct BuffsPanel: View {
                 }
 
                 Button("Buff all") {
-                    coordinator.buffAllGroups(snapshot: snapshot, buffName: coordinator.masterBuff)
+                    coordinator.buffAllGroups(snapshot: snapshot)
                 }
                 .buttonStyle(.borderedProminent)
                 .controlSize(.small)
-                .disabled(!canBuffAll)
             }
         }
         .padding(.horizontal, 12)
