@@ -33,11 +33,4 @@ struct BulkDispatcher: BulkDispatching {
             }
         }
     }
-
-    // Source-compatibility shim for call sites that don't have an instance
-    // injected yet. Uses the default 80 ms delay.
-    @discardableResult
-    static func run<T>(items: [T], action: @MainActor @escaping (Int, T) -> Void) -> Task<Void, Never> {
-        Self.default.run(items: items, action: action)
-    }
 }

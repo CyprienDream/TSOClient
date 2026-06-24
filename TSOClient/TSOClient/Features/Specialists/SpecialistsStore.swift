@@ -7,9 +7,10 @@ final class SpecialistsStore {
     var playerLevel: Int? = nil
 
     // Prestigious Friend Buff (MultiplierBuffZone2_PremiumFriendBuff*). When
-    // toggled on, every explorer/geologist duration estimate is multiplied
-    // by ExplorerDurationRegistry.pfbMultiplier (0.8). Manual toggle for
-    // now — we don't currently parse the active-buff vector from AMF.
+    // active, every explorer/geologist duration estimate is multiplied by
+    // ExplorerDurationRegistry.pfbMultiplier (0.8). Auto-detected from
+    // dZoneVO.zoneBuffs by PlayerBuffsHandler; the panel toggle is a
+    // manual override that the next inbound PLAYER_BUFFS payload reasserts.
     var pfbActive: Bool = false
 
     let formatter: SpecialistDisplayFormatter
