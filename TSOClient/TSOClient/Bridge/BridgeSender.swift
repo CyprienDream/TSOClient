@@ -5,9 +5,12 @@ import WebKit
 final class BridgeSender: OutboundDispatching {
     weak var webView: WKWebView?
     private let logger: Logger
+    private let serializer: WireCommandJSSerializing
 
-    init(logger: Logger = ConsoleLogger()) {
+    init(logger: Logger = ConsoleLogger(),
+         serializer: WireCommandJSSerializing = DefaultWireCommandJSSerializer()) {
         self.logger = logger
+        self.serializer = serializer
     }
 
     func send(_ command: WireCommand) {
@@ -15,7 +18,7 @@ final class BridgeSender: OutboundDispatching {
             logger.log("[BridgeSender] webView is nil — message dropped")
             return
         }
-        guard let js = renderJSExpression(for: command) else {
+        guard let js = serializer.serialize(command) else {
             logger.log("[BridgeSender] failed to encode payload for \(command.type)")
             return
         }

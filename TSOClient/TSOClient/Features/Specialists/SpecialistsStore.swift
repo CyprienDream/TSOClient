@@ -48,18 +48,7 @@ final class SpecialistsStore {
                 taskSubTaskId:  $0.taskSubTaskId
             )
         }
-        // Avoid blowing up SwiftUI row identity when nothing actually changed.
-        // If the id sequence still matches, replace only the indices whose
-        // content actually differs; otherwise fall back to a full swap.
-        let sameShape = items.count == next.count &&
-            zip(items, next).allSatisfy { $0.id == $1.id }
-        if sameShape {
-            for idx in next.indices where items[idx] != next[idx] {
-                items[idx] = next[idx]
-            }
-        } else {
-            items = next
-        }
+        SpecialistsDiffer.apply(next: next, to: &items)
         if let lvl = payload.playerLevel { playerLevel = lvl }
         if let t = payload.serverTime {
             serverTime = t
