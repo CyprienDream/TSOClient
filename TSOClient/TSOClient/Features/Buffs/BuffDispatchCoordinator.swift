@@ -15,6 +15,7 @@ final class BuffDispatchCoordinator {
     private let dispatcher: BuffDispatchPort
     private let classifier: BuffCategoryClassifier
     private let categoryRegistry: BuildingCategoryRegistry
+    private let naming: NamingRegistry
     private let bulk: BulkDispatching
     private let logger: Logger
 
@@ -23,6 +24,7 @@ final class BuffDispatchCoordinator {
          dispatcher: BuffDispatchPort,
          classifier: BuffCategoryClassifier = .default,
          categoryRegistry: BuildingCategoryRegistry = .default,
+         naming: NamingRegistry = .default,
          bulk: BulkDispatching = BulkDispatcher.default,
          logger: Logger = ConsoleLogger()) {
         self.buffsStore = buffsStore
@@ -30,6 +32,7 @@ final class BuffDispatchCoordinator {
         self.dispatcher = dispatcher
         self.classifier = classifier
         self.categoryRegistry = categoryRegistry
+        self.naming = naming
         self.bulk = bulk
         self.logger = logger
     }
@@ -42,7 +45,7 @@ final class BuffDispatchCoordinator {
     private static let fallbackDefaultBuff = "ProductivityBuffLvl300"
 
     var groups: [(category: BuildingCategory, buildings: [BuildingsStore.BuildingItem])] {
-        let snapshot = categoryRegistry.categories
+        var snapshot = categoryRegistry.categories
             .compactMap { category -> (category: BuildingCategory, buildings: [BuildingsStore.BuildingItem])? in
                 let buildings = buildingsStore.buildings(matchingSkinBases: category.skinBases)
                 return buildings.isEmpty ? nil : (category, buildings)
@@ -50,8 +53,29 @@ final class BuffDispatchCoordinator {
             .sorted {
                 $0.category.displayName.localizedCaseInsensitiveCompare($1.category.displayName) == .orderedAscending
             }
+        snapshot.append(contentsOf: unmappedGroups())
         applyDefaults(to: snapshot)
         return snapshot
+    }
+
+    // Surface any building skinBase not covered by the registry as its own
+    // synthetic category in the "Unmapped" group. Each gets a humanized name
+    // from NamingRegistry, no default buff, and is skipped by master ops.
+    private func unmappedGroups() -> [(category: BuildingCategory, buildings: [BuildingsStore.BuildingItem])] {
+        let mappedBases = Set(categoryRegistry.categories.flatMap { $0.skinBases })
+        let unmappedBases = buildingsStore.bySkinBase.keys
+            .filter { !mappedBases.contains($0) }
+            .sorted()
+        return unmappedBases.compactMap { base in
+            guard let buildings = buildingsStore.bySkinBase[base], !buildings.isEmpty else { return nil }
+            let category = BuildingCategory(
+                displayName: naming.buildingName(skinBase: base),
+                skinBases: [base],
+                defaultBuff: nil,
+                group: BuildingGroup.unmapped.rawValue
+            )
+            return (category, buildings)
+        }
     }
 
     // Same data as `groups`, bucketed by `category.group` and emitted in the
@@ -77,6 +101,8 @@ final class BuffDispatchCoordinator {
     // `selectedBuff`; idempotent.
     private func applyDefaults(to snapshot: [(category: BuildingCategory, buildings: [BuildingsStore.BuildingItem])]) {
         for group in snapshot {
+            // Unmapped categories never get a default — user must opt in per row.
+            if group.category.group == BuildingGroup.unmapped.rawValue { continue }
             guard selectedBuff[group.category.id] == nil else { continue }
             let raw = group.category.defaultBuff ?? Self.fallbackDefaultBuff
             guard buffsStore.item(for: raw) != nil else { continue }
@@ -84,11 +110,14 @@ final class BuffDispatchCoordinator {
         }
     }
 
-    // Apply the master selection across every visible category.
+    // Apply the master selection across every visible category. Unmapped
+    // categories are left alone so the master picker can't accidentally
+    // schedule a buff against a building we don't recognize.
     func selectMasterBuff(_ buffName: String,
                           across snapshot: [(category: BuildingCategory, buildings: [BuildingsStore.BuildingItem])]) {
         masterBuff = buffName
         for group in snapshot {
+            if group.category.group == BuildingGroup.unmapped.rawValue { continue }
             selectedBuff[group.category.id] = buffName
         }
     }
@@ -117,6 +146,8 @@ final class BuffDispatchCoordinator {
         struct Step { let building: BuildingsStore.BuildingItem; let buff: BuffsStore.BuffItem }
         var steps: [Step] = []
         for group in snapshot {
+            // Unmapped categories are excluded from the master "Buff all".
+            if group.category.group == BuildingGroup.unmapped.rawValue { continue }
             let name = selectedBuff[group.category.id] ?? ""
             guard !name.isEmpty, let buff = buffsStore.item(for: name) else { continue }
             for b in group.buildings {
