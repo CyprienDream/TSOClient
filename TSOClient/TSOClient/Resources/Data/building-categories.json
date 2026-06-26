@@ -1,12 +1,12 @@
 [
   { "displayName": "Stone Mason",                       "skinBases": ["Mason"],                                  "group": "Masons" },
-  { "displayName": "Granite Mason",                     "skinBases": ["GraniteMason"],                           "group": "Masons",           "defaultBuff": "ProductivityBuffLvl10" },
+  { "displayName": "Granite Mason",                     "skinBases": ["GraniteMason"],                           "group": "Masons" },
   { "displayName": "Marble Mason",                      "skinBases": ["MarbleMason"],                            "group": "Masons" },
 
-  { "displayName": "Copper Mine",                       "skinBases": ["BronzeMine"],                             "group": "Mines",            "defaultBuff": "ProductivityBuffLvl3" },
-  { "displayName": "Iron Mine",                         "skinBases": ["IronMine"],                               "group": "Mines",            "defaultBuff": "ProductivityBuffLvl3" },
-  { "displayName": "Gold Mine",                         "skinBases": ["GoldMine"],                               "group": "Mines",            "defaultBuff": "ProductivityBuffLvl3" },
-  { "displayName": "Epic Coal Mine",                    "skinBases": ["EpicCoalMine"],                           "group": "Mines",            "defaultBuff": "ProductivityBuffLvl3" },
+  { "displayName": "Copper Mine",                       "skinBases": ["BronzeMine"],                             "group": "Mines" },
+  { "displayName": "Iron Mine",                         "skinBases": ["IronMine"],                               "group": "Mines" },
+  { "displayName": "Gold Mine",                         "skinBases": ["GoldMine"],                               "group": "Mines" },
+  { "displayName": "Epic Coal Mine",                    "skinBases": ["EpicCoalMine"],                           "group": "Mines" },
 
   { "displayName": "Copper Smelter",                    "skinBases": ["BronzeSmelter"],                          "group": "Smelters" },
   { "displayName": "Iron Smelter",                      "skinBases": ["IronSmelter"],                            "group": "Smelters" },
@@ -36,7 +36,7 @@
   { "displayName": "Improved Farm",                     "skinBases": ["ImprovedFarm"],                           "group": "Food" },
   { "displayName": "Silo",                              "skinBases": ["silo"],                                   "group": "Food" },
   { "displayName": "Improved Silo",                     "skinBases": ["ImprovedSilo"],                           "group": "Food" },
-  { "displayName": "Sunflower Farm",                    "skinBases": ["SunflowerFarm"],                          "group": "Food",             "defaultBuff": "ProductivityBuffSunflowerFertilizer" },
+  { "displayName": "Sunflower Farm",                    "skinBases": ["SunflowerFarm"],                          "group": "Food" },
   { "displayName": "Bakery",                            "skinBases": ["Bakery"],                                 "group": "Food" },
   { "displayName": "Improved Bakery",                   "skinBases": ["ImprovedBakery"],                         "group": "Food" },
   { "displayName": "Mill",                              "skinBases": ["Miller"],                                 "group": "Food" },
@@ -55,8 +55,8 @@
   { "displayName": "Recycling Manufactory",             "skinBases": ["coal_workyard", "RecyclingManufactory"],  "group": "Coal" },
   { "displayName": "Coking Plant",                      "skinBases": ["CokingPlant"],                            "group": "Coal" },
 
-  { "displayName": "Provision House",                   "skinBases": ["ProvisionHouse"],                         "group": "Provision House",  "defaultBuff": "" },
-  { "displayName": "Provision House 2",                 "skinBases": ["ProvisionHouse2"],                        "group": "Provision House",  "defaultBuff": "" },
+  { "displayName": "Provision House",                   "skinBases": ["ProvisionHouse"],                         "group": "Provision House" },
+  { "displayName": "Provision House 2",                 "skinBases": ["ProvisionHouse2"],                        "group": "Provision House" },
 
   { "displayName": "Barracks",                          "skinBases": ["Barracks", "Barracks3"],                  "group": "Barracks" },
   { "displayName": "Elite Barracks",                    "skinBases": ["EliteBarracks"],                          "group": "Barracks" },
@@ -88,8 +88,8 @@
   { "displayName": "Improved Lettersmith",              "skinBases": ["ImprovedLettersmith"],                    "group": "Science" },
   { "displayName": "Ornamentalsmith",                   "skinBases": ["Ornamentalsmith"],                        "group": "Science" },
 
-  { "displayName": "Bookbinder",                        "skinBases": ["Bookbinder"],                             "group": "Bookbinder",       "defaultBuff": "" },
-  { "displayName": "Adventure Bookbinder",              "skinBases": ["AdventureBookbinder"],                    "group": "Bookbinder",       "defaultBuff": "" },
+  { "displayName": "Bookbinder",                        "skinBases": ["Bookbinder"],                             "group": "Bookbinder" },
+  { "displayName": "Adventure Bookbinder",              "skinBases": ["AdventureBookbinder"],                    "group": "Bookbinder" },
 
   { "displayName": "Homestead",                         "skinBases": ["Homestead"] },
   { "displayName": "Rabbit Retreat",                    "skinBases": ["RabbitBreeding"] },

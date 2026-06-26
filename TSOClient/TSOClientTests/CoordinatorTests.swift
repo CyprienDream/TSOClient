@@ -473,6 +473,79 @@ struct BuffDispatchCoordinatorTests {
         #expect(dispatcher.sent.isEmpty)
     }
 
+    @Test func applyDefaultsResolvesSubgroupOrFallsBackToStaticDefault() {
+        // Three categories exercising every resolution path:
+        //   - Copper Mine has a subgroup entry "Aunt Irma's Basket" →
+        //     resolves via inventory to "ProductivityBuffLvl3".
+        //   - Iron Mine has a subgroup entry "" → opt-out, no default seeded.
+        //   - Gold Mine has no subgroup entry → static fallback raw
+        //     "ProductivityBuffLvl300".
+        let naming = NamingRegistry(specialistSubtypes: [:], buffs: [
+            "ProductivityBuffLvl3":   "Aunt Irma's Basket",
+            "ProductivityBuffLvl300": "Aunt Irma's Feast",
+        ], buildings: [:])
+        let buffs = BuffsStore(naming: naming)
+        buffs.apply(InboundMessage.BuffsPayload(items: [
+            .init(uid1: 1, uid2: 1, buffName: "ProductivityBuffLvl3",
+                  resourceName: "", amount: 10, insertedAt: 0),
+            .init(uid1: 2, uid2: 2, buffName: "ProductivityBuffLvl300",
+                  resourceName: "", amount: 10, insertedAt: 0),
+        ]))
+        let buildings = BuildingsStore()
+        buildings.apply(InboundMessage.BuildingsPayload(items: [
+            .init(gridIndex: 1, skin: "BronzeMine_01", uid1: 1, uid2: 0, activeBuff: nil),
+            .init(gridIndex: 2, skin: "IronMine_01",   uid1: 2, uid2: 0, activeBuff: nil),
+            .init(gridIndex: 3, skin: "GoldMine_01",   uid1: 3, uid2: 0, activeBuff: nil),
+        ]))
+        let categories = BuildingCategoryRegistry(categories: [
+            BuildingCategory(displayName: "Copper Mine", skinBases: ["BronzeMine"], group: "Mines"),
+            BuildingCategory(displayName: "Iron Mine",   skinBases: ["IronMine"],   group: "Mines"),
+            BuildingCategory(displayName: "Gold Mine",   skinBases: ["GoldMine"],   group: "Mines"),
+        ])
+        let panelConfig = BuffPanelConfig(subgroups: [
+            "Copper Mine": "Aunt Irma's Basket",
+            "Iron Mine":   "",
+        ])
+        let coord = BuffDispatchCoordinator(
+            buffsStore: buffs, buildingsStore: buildings,
+            dispatcher: CapturingDispatcher(),
+            classifier: .empty,
+            categoryRegistry: categories,
+            panelConfig: panelConfig,
+            logger: MockLogger())
+
+        _ = coord.groups   // triggers applyDefaults
+
+        // selectedBuff stores RAW names regardless of source.
+        #expect(coord.selectedBuff["Copper Mine"] == "ProductivityBuffLvl3")
+        #expect(coord.selectedBuff["Iron Mine"]   == nil)
+        #expect(coord.selectedBuff["Gold Mine"]   == "ProductivityBuffLvl300")
+    }
+
+    @Test func ignoredSkinBaseIsDroppedFromUnmappedSnapshot() {
+        // A building with a skin that matches the panel-config ignored list
+        // should not appear in the coordinator's snapshot at all.
+        let buildings = BuildingsStore()
+        buildings.apply(InboundMessage.BuildingsPayload(items: [
+            .init(gridIndex: 1, skin: "GreatHall_garrison_01", uid1: 1, uid2: 0, activeBuff: nil),
+            .init(gridIndex: 2, skin: "Mason_01",              uid1: 2, uid2: 0, activeBuff: nil),
+        ]))
+        let categories = BuildingCategoryRegistry(categories: [
+            BuildingCategory(displayName: "Stone Mason", skinBases: ["Mason"], group: "Masons"),
+        ])
+        let panelConfig = BuffPanelConfig(ignoredContains: ["garrison"])
+        let coord = BuffDispatchCoordinator(
+            buffsStore: BuffsStore(naming: .empty), buildingsStore: buildings,
+            dispatcher: CapturingDispatcher(),
+            classifier: .empty,
+            categoryRegistry: categories,
+            panelConfig: panelConfig,
+            logger: MockLogger())
+
+        let names = coord.groups.map(\.category.displayName)
+        #expect(names == ["Stone Mason"])
+    }
+
     @Test func buildingBuffsFilterUsesClassifier() {
         let buffs = BuffsStore(naming: .empty)
         let payload = InboundMessage.BuffsPayload(items: [

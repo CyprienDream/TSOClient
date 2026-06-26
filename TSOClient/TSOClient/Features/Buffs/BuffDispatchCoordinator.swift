@@ -15,7 +15,7 @@ final class BuffDispatchCoordinator {
     private let dispatcher: BuffDispatchPort
     private let classifier: BuffCategoryClassifier
     private let categoryRegistry: BuildingCategoryRegistry
-    private let ignored: IgnoredBuildingsRegistry
+    private let panelConfig: BuffPanelConfig
     private let naming: NamingRegistry
     private let bulk: BulkDispatching
     private let logger: Logger
@@ -25,7 +25,7 @@ final class BuffDispatchCoordinator {
          dispatcher: BuffDispatchPort,
          classifier: BuffCategoryClassifier = .default,
          categoryRegistry: BuildingCategoryRegistry = .default,
-         ignored: IgnoredBuildingsRegistry = .default,
+         panelConfig: BuffPanelConfig = .default,
          naming: NamingRegistry = .default,
          bulk: BulkDispatching = BulkDispatcher.default,
          logger: Logger = ConsoleLogger()) {
@@ -34,7 +34,7 @@ final class BuffDispatchCoordinator {
         self.dispatcher = dispatcher
         self.classifier = classifier
         self.categoryRegistry = categoryRegistry
-        self.ignored = ignored
+        self.panelConfig = panelConfig
         self.naming = naming
         self.bulk = bulk
         self.logger = logger
@@ -77,8 +77,9 @@ final class BuffDispatchCoordinator {
     // Surface any building skinBase not covered by the registry as its own
     // synthetic category. `_mini` skins are routed to the Tributes group with
     // an "X Tribute" display label; ignored skinBases (non-buffable structures
-    // listed in ignored-buildings.json) are dropped entirely; everything else
-    // lands in Unmapped. None get a default buff — user must opt in per row.
+    // listed under `ignored` in buff-panel-config.json) are dropped entirely;
+    // everything else lands in Unmapped. None get a default buff — user must
+    // opt in per row.
     private func unmappedGroups() -> [(category: BuildingCategory, buildings: [BuildingsStore.BuildingItem])] {
         let mappedBases = Set(categoryRegistry.categories.flatMap { $0.skinBases })
         let leftoverBases = buildingsStore.bySkinBase.keys
@@ -86,7 +87,7 @@ final class BuffDispatchCoordinator {
             .sorted()
         return leftoverBases.compactMap { base in
             guard let buildings = buildingsStore.bySkinBase[base], !buildings.isEmpty else { return nil }
-            if ignored.shouldIgnore(skinBase: base) { return nil }
+            if panelConfig.shouldIgnore(skinBase: base) { return nil }
             let displayName: String
             let group: BuildingGroup
             if let stem = Self.tributeStem(of: base) {
@@ -127,15 +128,46 @@ final class BuffDispatchCoordinator {
     // time a category appears, but only if the buff exists in inventory and
     // the user hasn't already picked something. Pure side-effect on
     // `selectedBuff`; idempotent.
+    //
+    // Resolution order:
+    //   1. Per-category `defaultBuff` on the struct itself (raw buff name).
+    //      Only set in-code today by the synthetic tribute/unmapped
+    //      constructors using the "" sentinel.
+    //   2. Per-subgroup display name from buff-panel-config.json
+    //      (key = category display name, e.g. "Copper Mine"), resolved
+    //      back to a raw buffName via the live BuffsStore inventory.
+    //   3. Static fallback (raw buff name) — only reached for categories
+    //      that aren't listed in `subgroups` yet (new building types).
+    //
+    // "" or a display name not in inventory leaves the row unset so the
+    // user opts in manually.
     private func applyDefaults(to snapshot: [(category: BuildingCategory, buildings: [BuildingsStore.BuildingItem])]) {
         for group in snapshot {
             // Unmapped categories never get a default — user must opt in per row.
             if group.category.group == BuildingGroup.unmapped.rawValue { continue }
             guard selectedBuff[group.category.id] == nil else { continue }
-            let raw = group.category.defaultBuff ?? Self.fallbackDefaultBuff
+
+            let raw: String
+            if let categoryOverride = group.category.defaultBuff {
+                raw = categoryOverride
+            } else if let subgroupDisplay = panelConfig
+                        .defaultBuffDisplayName(forSubgroup: group.category.displayName) {
+                guard let resolved = resolveBuffRaw(displayName: subgroupDisplay) else { continue }
+                raw = resolved
+            } else {
+                raw = Self.fallbackDefaultBuff
+            }
+
             guard buffsStore.item(for: raw) != nil else { continue }
             selectedBuff[group.category.id] = raw
         }
+    }
+
+    // Display-name → raw buffName via BuffsStore inventory. Empty string or
+    // an unrecognized display name → nil (caller skips seeding the row).
+    private func resolveBuffRaw(displayName: String) -> String? {
+        guard !displayName.isEmpty else { return nil }
+        return buffsStore.uniqueTypes.first { $0.displayLabel == displayName }?.buffName
     }
 
     // Apply the master selection across every visible category. Unmapped
