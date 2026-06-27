@@ -5,11 +5,15 @@ struct BuffsPanel: View {
     var buffsStore: BuffsStore
     var coordinator: BuffDispatchCoordinator
 
+    @State private var searchText: String = ""
+
     var body: some View {
         // Compute once per body invocation so each row reads from the same snapshot.
         let snapshot = coordinator.groups
         let buffs = coordinator.buildingBuffs
         let buffsVersion = buffsStore.version
+        let trimmedQuery = searchText.trimmingCharacters(in: .whitespaces)
+        let visibleSections = coordinator.filteredGroupedSnapshot(matching: trimmedQuery)
         return VStack(alignment: .leading, spacing: 0) {
             header
             Divider()
@@ -29,31 +33,41 @@ struct BuffsPanel: View {
                     .padding()
             } else {
                 masterRow(buffs: buffs, snapshot: snapshot)
+                searchField
                 Divider()
-                ScrollView {
-                    LazyVStack(alignment: .leading, spacing: 0) {
-                        ForEach(coordinator.groupedSnapshot, id: \.group) { section in
-                            SectionHeader(group: section.group, count: section.items.count)
-                            ForEach(section.items, id: \.category.id) { group in
-                                let sel = coordinator.selectedBuff[group.category.id] ?? ""
-                                BuildingGroupRow(
-                                    categoryDisplayName: group.category.displayName,
-                                    buildingsCount: group.buildings.count,
-                                    buffedCount: group.buildings.reduce(0) { $0 + ($1.activeBuff != nil ? 1 : 0) },
-                                    availableBuffs: buffs,
-                                    buffsVersion: buffsVersion,
-                                    selectedBuff: sel,
-                                    onSelect: { newName in
-                                        coordinator.selectedBuff[group.category.id] = newName
-                                    },
-                                    onBuffAll: {
-                                        coordinator.buffAll(group: group.buildings, buffName: sel)
-                                    }
-                                )
-                                .equatable()
-                                .padding(.horizontal, 12)
-                                .background(section.group.tint.opacity(0.05))
-                                Divider()
+                if visibleSections.isEmpty {
+                    Text("No buildings match \u{201C}\(trimmedQuery)\u{201D}.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .multilineTextAlignment(.center)
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                        .padding()
+                } else {
+                    ScrollView {
+                        LazyVStack(alignment: .leading, spacing: 0) {
+                            ForEach(visibleSections, id: \.group) { section in
+                                SectionHeader(group: section.group, count: section.items.count)
+                                ForEach(section.items, id: \.category.id) { group in
+                                    let sel = coordinator.selectedBuff[group.category.id] ?? ""
+                                    BuildingGroupRow(
+                                        categoryDisplayName: group.category.displayName,
+                                        buildingsCount: group.buildings.count,
+                                        buffedCount: group.buildings.reduce(0) { $0 + ($1.activeBuff != nil ? 1 : 0) },
+                                        availableBuffs: buffs,
+                                        buffsVersion: buffsVersion,
+                                        selectedBuff: sel,
+                                        onSelect: { newName in
+                                            coordinator.selectedBuff[group.category.id] = newName
+                                        },
+                                        onBuffAll: {
+                                            coordinator.buffAll(group: group.buildings, buffName: sel)
+                                        }
+                                    )
+                                    .equatable()
+                                    .padding(.horizontal, 12)
+                                    .background(section.group.tint.opacity(0.05))
+                                    Divider()
+                                }
                             }
                         }
                     }
@@ -61,6 +75,29 @@ struct BuffsPanel: View {
             }
         }
         .frame(width: 320)
+    }
+
+    private var searchField: some View {
+        HStack(spacing: 6) {
+            Image(systemName: "magnifyingglass")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            TextField("Search buildings", text: $searchText)
+                .textFieldStyle(.roundedBorder)
+                .controlSize(.small)
+            if !searchText.isEmpty {
+                Button {
+                    searchText = ""
+                } label: {
+                    Image(systemName: "xmark.circle.fill")
+                        .foregroundStyle(.secondary)
+                }
+                .buttonStyle(.plain)
+                .help("Clear search")
+            }
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 6)
     }
 
     private var header: some View {
