@@ -17,6 +17,13 @@ protocol BuffDispatchPort {
                       targetGrid: Int)
 }
 
+protocol TradeDispatchPort {
+    func dispatchTrade(receipientId: Int,
+                       offerResource: String, offerAmount: Int,
+                       costsResource: String, costsAmount: Int,
+                       slotType: Int)
+}
+
 // BridgeSender is the production conformer for both ports: it constructs
 // the wire commands and sends them. Adapters could substitute in tests.
 extension BridgeSender: SpecialistDispatchPort {
@@ -37,5 +44,18 @@ extension BridgeSender: BuffDispatchPort {
         send(DispatchBuffCommand(
             buffUid1: buffUid1, buffUid2: buffUid2,
             targetGrid: targetGrid))
+    }
+}
+
+extension BridgeSender: TradeDispatchPort {
+    func dispatchTrade(receipientId: Int,
+                       offerResource: String, offerAmount: Int,
+                       costsResource: String, costsAmount: Int,
+                       slotType: Int) {
+        send(DispatchTradeCommand(
+            receipientId: receipientId,
+            offerResource: offerResource, offerAmount: offerAmount,
+            costsResource: costsResource, costsAmount: costsAmount,
+            slotType: slotType))
     }
 }

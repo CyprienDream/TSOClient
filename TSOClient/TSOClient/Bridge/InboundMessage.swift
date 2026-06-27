@@ -54,6 +54,27 @@ enum InboundMessage {
         }
     }
 
+    // Wire-confirmed resource names accumulated by the JS scanner. The
+    // scanner only emits when the set grew, so a refresh on this message
+    // is always a delta in the "got bigger" direction.
+    struct ResourcesPayload: Decodable {
+        let names: [String]
+    }
+
+    // Friend roster from dPlayerListVO (type=1014). Friends and guild
+     // members share a normalized shape so the recipient picker can union
+     // them by userID without two separate Decodable types downstream.
+    struct PlayerRosterPayload: Decodable {
+        let items: [Item]
+
+        struct Item: Decodable {
+            let id: Int
+            let username: String
+            let level: Int
+            let online: Bool
+        }
+    }
+
     struct SpecialistsPayload: Decodable {
         let items: [Item]
         let playerLevel: Int?

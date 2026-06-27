@@ -202,6 +202,17 @@
          'correlationId', 'body', 'clientId', 'destination', 'headers',
          'messageId', 'timestamp', 'timeToLive']);
 
+    // Trade VOs — captured 2026-06-27 from a live private-trade send.
+    // dResourceVO members order observed: name_string, amount, producedAmount.
+    // dTradeOfferVO members order observed:
+    //   receipientId (note typo, preserve), offerRes, offerBuff,
+    //   costsRes, costsBuff, lots, slotType, slotPos.
+    var dResourceVO = trait('defaultGame.Communication.VO.dResourceVO',
+        ['name_string', 'amount', 'producedAmount']);
+    var dTradeOfferVO = trait('defaultGame.Communication.VO.dTradeOfferVO',
+        ['receipientId', 'offerRes', 'offerBuff',
+         'costsRes', 'costsBuff', 'lots', 'slotType', 'slotPos']);
+
     // ── _TSORPC namespace ─────────────────────────────────────────────────
 
     var _counterOffset = 0;  // increments each dispatch to stay distinct within a session
@@ -350,7 +361,55 @@
         });
     }
 
-    window._TSORPC = { sendAMF: sendAMF, dispatchSpecialist: dispatchSpecialist, dispatchBuff: dispatchBuff };
+    // opcode=1049 — send a private trade offer. Unlike opcodes 95/61,
+    // dServerCall.data is a dTradeOfferVO directly (no dServerAction wrapper).
+    // Verified 2026-06-27 from a live capture (slotType=4 = private trade).
+    function dispatchTrade(opts) {
+        var ctx = requireAuthCtx('[_TSORPC:trade]');
+        if (!ctx) return Promise.reject(new Error('auth not ready'));
+
+        var receipientId    = opts.receipientId | 0;
+        var offerName       = String(opts.offerResource || '');
+        var offerAmount     = opts.offerAmount | 0;
+        var costsName       = String(opts.costsResource || '');
+        var costsAmount     = opts.costsAmount | 0;
+        var lots            = (opts.lots !== undefined ? opts.lots : 0) | 0;
+        var slotType        = (opts.slotType !== undefined ? opts.slotType : 4) | 0;
+        var slotPos         = opts.slotPos | 0;
+
+        var offerRes = dResourceVO([offerName, offerAmount, 0]);
+        var costsRes = dResourceVO([costsName, costsAmount, 0]);
+        var trade    = dTradeOfferVO([
+            receipientId,
+            offerRes, null,                  // offerRes, offerBuff
+            costsRes, null,                  // costsRes, costsBuff
+            lots, slotType, slotPos,
+        ]);
+        var call = dServerCall([1049, ctx.zoneID, trade,
+                                ctx.dsoAuthUser, ctx.dsoAuthToken, ctx.dsoAuthRandomClientID]);
+        var msg  = buildRemotingMessage(ctx, call);
+
+        webkit.messageHandlers.logger.postMessage(
+            '[_TSORPC:trade] to=' + receipientId +
+            ' offer=' + offerAmount + 'x' + offerName +
+            ' costs=' + costsAmount + 'x' + costsName +
+            ' slotType=' + slotType +
+            ' zone=' + ctx.zoneID);
+
+        return sendAMF([msg]).then(function(result) {
+            webkit.messageHandlers.logger.postMessage(
+                '[_TSORPC:trade] ack: ' + JSON.stringify(result));
+        }).catch(function(e) {
+            webkit.messageHandlers.logger.postMessage('[_TSORPC:trade] error: ' + e);
+        });
+    }
+
+    window._TSORPC = {
+        sendAMF: sendAMF,
+        dispatchSpecialist: dispatchSpecialist,
+        dispatchBuff: dispatchBuff,
+        dispatchTrade: dispatchTrade,
+    };
     window._TSOAMFWriter = AMFWriter;
 
     // Register TSOBridge handlers for Swift-initiated dispatches.
@@ -360,6 +419,9 @@
         });
         window.TSOBridge.register('DISPATCH_BUFF', function(p) {
             dispatchBuff(p);
+        });
+        window.TSOBridge.register('DISPATCH_TRADE', function(p) {
+            dispatchTrade(p);
         });
         window.TSOBridge.register('RPC_SEND', function(p) {
             sendAMF(p.args || []);

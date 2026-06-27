@@ -4,7 +4,7 @@ struct ContentView: View {
     @State private var env = AppEnvironment()
     @State private var activeTab: SideTab = .specialists
 
-    enum SideTab { case specialists, buffs }
+    enum SideTab { case specialists, buffs, trade }
 
     var body: some View {
         HSplitView {
@@ -20,6 +20,7 @@ struct ContentView: View {
                 Picker("Tab", selection: $activeTab) {
                     Text("Specialists").tag(SideTab.specialists)
                     Text("Buffs").tag(SideTab.buffs)
+                    Text("Trade").tag(SideTab.trade)
                 }
                 .pickerStyle(.segmented)
                 .padding(8)
@@ -34,6 +35,12 @@ struct ContentView: View {
                         buildingsStore: env.buildings,
                         buffsStore: env.buffs,
                         coordinator: env.buffDispatch
+                    )
+                case .trade:
+                    TradePanel(
+                        recipientsStore: env.recipients,
+                        resourcesStore: env.resources,
+                        coordinator: env.tradeCoordinator
                     )
                 }
             }
