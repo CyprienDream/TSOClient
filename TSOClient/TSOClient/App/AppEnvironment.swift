@@ -9,11 +9,14 @@ struct AppEnvironment {
     let specialists: SpecialistsStore
     let buildings: BuildingsStore
     let buffs: BuffsStore
+    let recipients: RecipientsStore
+    let resources: ResourcesStore
     let executor: WKWebViewJSExecutor     // late-binding webView holder
     let sender: BridgeSender              // produces JS via WireCommandJSSerializing
     let inbound: InboundDispatcher
     let specialistDispatch: SpecialistDispatchCoordinator
     let buffDispatch: BuffDispatchCoordinator
+    let tradeCoordinator: TradeCoordinator
     let logger: Logger
 
     init(logger: Logger = ConsoleLogger(),
@@ -27,6 +30,10 @@ struct AppEnvironment {
         )
         self.buildings = BuildingsStore()
         self.buffs = BuffsStore(naming: naming)
+        let recipients = RecipientsStore()
+        self.recipients = recipients
+        let resources = ResourcesStore(logger: logger)
+        self.resources = resources
         let executor = WKWebViewJSExecutor(logger: logger)
         self.executor = executor
         let sender = BridgeSender(logger: logger, executor: executor)
@@ -36,6 +43,9 @@ struct AppEnvironment {
             store: specialists, dispatcher: sender, logger: logger)
         self.specialistDispatch = specialistDispatch
 
+        self.tradeCoordinator = TradeCoordinator(
+            recipients: recipients, dispatcher: sender, logger: logger)
+
         let inbound = InboundDispatcher(logger: logger)
         inbound.register(CollectiblesHandler(store: collectibles))
         inbound.register(SpecialistsHandler(
@@ -43,6 +53,9 @@ struct AppEnvironment {
         inbound.register(BuildingsHandler(store: buildings, logger: logger))
         inbound.register(BuffsHandler(store: buffs, logger: logger))
         inbound.register(PlayerBuffsHandler(store: specialists, logger: logger))
+        inbound.register(FriendsHandler(store: recipients, logger: logger))
+        inbound.register(GuildMembersHandler(store: recipients, logger: logger))
+        inbound.register(ResourcesHandler(store: resources, logger: logger))
         inbound.register(GameStateHandler(
             stores: [collectibles, specialists, buildings, buffs],
             logger: logger

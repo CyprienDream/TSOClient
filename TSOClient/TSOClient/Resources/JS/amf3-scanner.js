@@ -122,6 +122,26 @@
             if (shortCls === 'dBuildingVO') ctx.allBuildings.push(v);
             if (shortCls === 'DestructBuildingResultVO') ctx.destructed.push(v);
             if (shortCls === 'dSpecialistVO') ctx.specialists.push(v);
+            // dResourceVO.name_string is the canonical trade-side resource
+            // identifier ("Tool", "Wood", "Salpeter", "EMEventResource"…).
+            // Collect every one so the trade panel's dropdowns can populate
+            // from wire-confirmed names rather than a hardcoded guess list.
+            if (shortCls === 'dResourceVO' && typeof v.name_string === 'string' && v.name_string) {
+                ctx.resourceNames[v.name_string] = true;
+            }
+            // dTradeObjectVO carries an `offer` string of the form
+            //   "<offerResource>,<amount>|<costResource-or-action>,<amount>[,<extra>]|<lots>"
+            // The LHS pipe-segment is always a resource (it's what's given);
+            // the middle segment can be a resource OR an action verb
+            // (FillDeposit, BuildBuilding). We only harvest the LHS — safe
+            // and unambiguous.
+            if (shortCls === 'dTradeObjectVO' && typeof v.offer === 'string') {
+                var seg = v.offer.split('|')[0];
+                if (seg) {
+                    var nm = seg.split(',')[0];
+                    if (nm) ctx.resourceNames[nm] = true;
+                }
+            }
             // dServerActionResult.clientTime is the server-clock double, returned
             // in every response envelope. Snapshot the latest into ctx for the
             // SPECIALISTS payload; used as the reference for collectedTime conversion.
@@ -226,6 +246,8 @@
             gameWorldName: null,
             adventureName: null,
             treePfbHits:  [],    // VOs in the tree whose buffName_string names PFB
+            resourceNames: {},   // { name_string: true } — set of wire-confirmed
+                                 // resource names harvested this response
         };
     }
 
@@ -556,10 +578,132 @@
                         var sr = (body.__class && body.__class.indexOf('dServerResponse') >= 0) ? body : null;
                         if (!sr && body.data && body.data.__class && body.data.__class.indexOf('dServerResponse') >= 0) sr = body.data;
                         if (!sr) return;
+                        var srJson = '';
+                        try { srJson = JSON.stringify(sr, null, 2); } catch (_) {}
                         window._tsoDiagLog(
                             '[AMF3:' + channel + '] ack type=' + sr.type +
                             ' errorCode=' + (sr.data && sr.data.errorCode) +
-                            ' full=' + JSON.stringify(sr, null, 2).slice(0, 1500));
+                            ' full=' + srJson.slice(0, 1500));
+
+                        // Trade / friend / guild inbound — ungated, large
+                        // body. The existing diag log truncates at 1500 chars
+                        // which cuts off both the full trade list and the
+                        // guild member roster; this branch keeps the first
+                        // ~16k so a 98-member guild fits.
+                        var tag = srJson.indexOf('TradeWindow')              >= 0 ||
+                                  srJson.indexOf('DirectTrade')              >= 0 ||
+                                  srJson.indexOf('Mail')                     >= 0 ||
+                                  srJson.indexOf('Gift')                     >= 0 ||
+                                  srJson.indexOf('Donat')                    >= 0 ||
+                                  srJson.indexOf('SendResources')            >= 0 ||
+                                  srJson.indexOf('Player2Player')            >= 0 ||
+                                  srJson.indexOf('PlayerToPlayer')           >= 0 ? 'Trade'
+                                : srJson.indexOf('Guild.dGuildVO')           >= 0 ||
+                                  srJson.indexOf('dGuildPlayerListItemVO')   >= 0 ? 'Guild'
+                                : srJson.indexOf('dPlayerListVO')            >= 0 ||
+                                  srJson.indexOf('dPlayerListItemVO')        >= 0 ? 'Friends'
+                                : null;
+                        if (tag) {
+                            webkit.messageHandlers.logger.postMessage(
+                                '[' + tag + ':in:' + channel + '] type=' + sr.type +
+                                ' errorCode=' + (sr.data && sr.data.errorCode) +
+                                ' bytes=' + srJson.length +
+                                ' full=' + srJson.slice(0, 16000)
+                            );
+                        }
+
+                        // FRIENDS: dServerResponse type=1014 carries dPlayerListVO
+                        // → ArrayCollection<dPlayerListItemVO>{ id, avatarId,
+                        // username, playerLevel, friendSince, onlineStatus }.
+                        if (sr.type === 1014) {
+                            var fInner = sr.data && sr.data.data;
+                            var fList  = unwrapCollection(fInner && fInner.players != null ? fInner.players : fInner);
+                            var fItems = [];
+                            for (var fi = 0; fi < fList.length; fi++) {
+                                var fp = fList[fi];
+                                if (!fp || !fp.__class || fp.__class.indexOf('dPlayerListItemVO') < 0) continue;
+                                fItems.push({
+                                    id:       (typeof fp.id === 'number') ? fp.id : 0,
+                                    username: (typeof fp.username === 'string') ? fp.username : '',
+                                    level:    (typeof fp.playerLevel === 'number') ? fp.playerLevel : 0,
+                                    online:   !!fp.onlineStatus,
+                                });
+                            }
+                            if (fItems.length > 0) {
+                                window._tsoSend('FRIENDS', { items: fItems });
+                                webkit.messageHandlers.logger.postMessage(
+                                    '[Friends:emit] count=' + fItems.length);
+                            }
+                        }
+
+                        // GUILD_MEMBERS: dServerResponse type=4014 carries
+                        // dGuildVO; the member-list field name on that VO
+                        // isn't catalogued yet, so walk every key looking for
+                        // a collection whose first item is dGuildPlayerListItemVO.
+                        if (sr.type === 4014) {
+                            var guild = sr.data && sr.data.data;
+                            if (guild && typeof guild === 'object') {
+                                var gKeys = Object.keys(guild);
+                                var gMembers = null;
+                                var gFieldName = null;
+                                for (var gki = 0; gki < gKeys.length; gki++) {
+                                    var gK = gKeys[gki];
+                                    if (gK === '__class' || gK === 'leader') continue;
+                                    var gv = guild[gK];
+                                    if (gv == null) continue;
+                                    var glist = unwrapCollection(gv);
+                                    if (glist.length === 0) continue;
+                                    var gfirst = glist[0];
+                                    if (gfirst && gfirst.__class &&
+                                        gfirst.__class.indexOf('dGuildPlayerListItemVO') >= 0) {
+                                        gMembers = glist;
+                                        gFieldName = gK;
+                                        break;
+                                    }
+                                }
+                                if (gMembers && gMembers.length > 0) {
+                                    // One-time field-key dump so we can refine
+                                    // the extractor with confirmed key names.
+                                    if (!window._tsoGuildKeysDumped) {
+                                        window._tsoGuildKeysDumped = true;
+                                        var gSample = gMembers[0];
+                                        var gSampleJson = '';
+                                        try { gSampleJson = JSON.stringify(gSample).slice(0, 1500); } catch (_) {}
+                                        webkit.messageHandlers.logger.postMessage(
+                                            '[GuildMembers:keys] field=' + gFieldName +
+                                            ' count=' + gMembers.length +
+                                            ' keys=' + Object.keys(gSample).filter(function(k){return k!=='__class';}).join(',') +
+                                            ' sample=' + gSampleJson);
+                                    }
+                                    var gItems = [];
+                                    for (var mi = 0; mi < gMembers.length; mi++) {
+                                        var gm = gMembers[mi];
+                                        if (!gm) continue;
+                                        // Try several plausible field names. Once
+                                        // we see the keys dump above we'll narrow.
+                                        var gid = (typeof gm.playerID === 'number') ? gm.playerID
+                                                : (typeof gm.userID   === 'number') ? gm.userID
+                                                : (typeof gm.id       === 'number') ? gm.id
+                                                : 0;
+                                        var gname = (typeof gm.username        === 'string') ? gm.username
+                                                  : (typeof gm.username_string === 'string') ? gm.username_string
+                                                  : (typeof gm.name            === 'string') ? gm.name
+                                                  : (typeof gm.name_string     === 'string') ? gm.name_string
+                                                  : '';
+                                        var glevel = (typeof gm.playerLevel === 'number') ? gm.playerLevel : 0;
+                                        gItems.push({
+                                            id:       gid,
+                                            username: gname,
+                                            level:    glevel,
+                                            online:   !!gm.onlineLast24 || !!gm.onlineStatus,
+                                        });
+                                    }
+                                    window._tsoSend('GUILD_MEMBERS', { items: gItems });
+                                    webkit.messageHandlers.logger.postMessage(
+                                        '[GuildMembers:emit] count=' + gItems.length);
+                                }
+                            }
+                        }
                     });
                 })(bodies[i].value);
             }
@@ -576,6 +720,27 @@
             }
         }
         if (!parsed) return;
+
+        // Resource-name accumulator — runs on every parsed response,
+        // regardless of home-zone gating. Trade-office responses contain
+        // tons of dResourceVO instances and offer strings; the panel's
+        // dropdowns grow as the player navigates the game.
+        //
+        // _tsoSeenResources persists for the session; Swift side persists
+        // to UserDefaults so the list grows across launches. We only emit
+        // when the set actually grew to avoid bridge spam.
+        if (!window._tsoSeenResources) window._tsoSeenResources = {};
+        var seen = window._tsoSeenResources;
+        var added = 0;
+        for (var rname in ctx.resourceNames) {
+            if (!seen[rname]) { seen[rname] = true; added++; }
+        }
+        if (added > 0) {
+            var names = Object.keys(seen).sort();
+            window._tsoSend('RESOURCES', { names: names });
+            webkit.messageHandlers.logger.postMessage(
+                '[Resources:emit] +' + added + ' new (' + names.length + ' total)');
+        }
 
         // Skip responses that carry no game-world data at all.
         // Settings/auth have none of these; destruct-only pickup responses have ctx.destructed.

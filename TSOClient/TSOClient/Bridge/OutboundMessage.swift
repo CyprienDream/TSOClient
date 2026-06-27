@@ -23,6 +23,22 @@ struct DispatchSpecialistCommand: LoggableCommand {
     }
 }
 
+struct DispatchTradeCommand: LoggableCommand {
+    let receipientId: Int            // typo mirrors the wire field, do not "fix"
+    let offerResource: String        // e.g. "Tool" — dResourceVO.name_string
+    let offerAmount: Int
+    let costsResource: String        // e.g. "Wood"
+    let costsAmount: Int
+    let slotType: Int                // 4 = private trade, 0 = open-market
+
+    var type: String { "DISPATCH_TRADE" }
+    var logSummary: String {
+        "DISPATCH_TRADE to=\(receipientId) " +
+        "offer=\(offerAmount)x\(offerResource) costs=\(costsAmount)x\(costsResource) " +
+        "slot=\(slotType)"
+    }
+}
+
 struct DispatchBuffCommand: LoggableCommand {
     let buffUid1: Int
     let buffUid2: Int
