@@ -323,8 +323,21 @@ What was tried:
 
 ## Testing & CI
 
+### Swift suite
+
 - **Test target**: `TSOClientTests` (`com.apple.product-type.bundle.unit-test`), wired into the `TSOClient` shared scheme's `TestAction`. Uses **Swift Testing** (`@Suite` / `@Test`), not XCTest.
-- **Current suites**: `BridgeTests` (InboundDispatcher + outbound JS serializer), `CoordinatorTests` (specialist + buff dispatch coordinators, including auto-loop re-dispatch timers), `RegistryTests`, `SpecialistLearnerTests`. `Mocks.swift` provides `MockLogger`, `MockKeyValueStore`, `MockResourceLoader`, `CapturingDispatcher` — fake the relevant narrow seam, don't spin up `AppEnvironment`.
+- **Suites by topic** — when adding a new test, extend the matching file before creating a new one:
+  - `BridgeTests` — `InboundDispatcher` + `WireCommandJSSerializer` (Swift→JS render shape)
+  - `CoordinatorTests` — `SpecialistDispatchCoordinator` + `BuffDispatchCoordinator` (selection, bulk, auto-loop)
+  - `StoreTests` — every `@Observable` store (apply / index rebuild / clear / version bump)
+  - `HandlerTests` — `InboundMessageHandler` *side effects* (auto-loop kick, `ZONE_LEFT` wipe, PFB sink)
+  - `AvailabilityTests` — `SpecialistKindPolicy` + `TaskCode.isAvailable` (skill ID & level gates)
+  - `TradeTests` — `TradeCoordinator` + `ResourcesStore` (persistence, legacy migration)
+  - `RegistryTests` — JSON-loaded registries (`NamingRegistry`, `BuildingCategoryRegistry`, `BuffPanelConfig`, `BuffCategoryClassifier`, `ExplorerDurationRegistry`)
+  - `SpecialistLearnerTests` — `SpecialistDurationLearner` + `SpecialistDisplayFormatter`
+  - `DifferTests` — `SpecialistsDiffer.apply` same-shape vs reshape paths
+  - `UtilityTests` — `DurationFormatter`, `String+CamelCase`, `BuildingSkinNormalizer`, `BulkDispatcher`
+- **Mocks** live in `Mocks.swift`: `MockLogger`, `MockKeyValueStore`, `MockResourceLoader`, `MockJSONFileStore`, `FakeDurationEstimator`, `FakeAutoLoopRunner`, `CapturingDispatcher` (conforms to all three dispatch ports). Extend these — don't invent parallel fakes.
 - **Run locally**:
   ```
   DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer \
@@ -333,8 +346,50 @@ What was tried:
              -destination 'platform=macOS' \
              test
   ```
-- **CI**: `.github/workflows/ci.yml` runs on every `pull_request` event (push to any branch with an open PR). Single `build-and-test` job on `macos-26`: ad-hoc signs (`CODE_SIGN_IDENTITY=-`, `CODE_SIGNING_REQUIRED=NO`), then runs `xcodebuild build` followed by `xcodebuild test`. `concurrency` cancels superseded runs on the same PR branch.
-- **Branch protection** (must be configured in GitHub UI, not in YAML): require status check `Build & Test` on `main` to block merges on red CI.
+
+### JS suite
+
+- **Runner**: Vitest. Tests live in `js-tests/` and import the production JS modules unmodified via `loadModule.js`, which runs each IIFE inside a Node `vm` sandbox with stubbed `window` / `webkit.messageHandlers.logger` / `fetch`.
+- **Suites**: `parser.test.js` (AMF3 primitive + envelope roundtrips), `encoder.test.js` (trait member order pinned via encode→parse roundtrip through `_TSORPC.dispatch*`), `classifier.test.js` (subtype tables, `classifySpec` priority, `learnFromOutbound`).
+- **Run locally**: `npm test`. First time on a fresh checkout: `npm install`.
+- **Do not edit JS modules to support tests.** The sandbox loader is the contract — add stubs to `createAMFSandbox()` instead.
+
+### What to test when adding/modifying code
+
+Match the change to a row. If a row says "must," CI passes without the test but the gap is a regression risk you signed off on.
+
+| Change                                              | Must add tests in                                                              |
+|-----------------------------------------------------|--------------------------------------------------------------------------------|
+| New `@Observable` store                             | `StoreTests` (apply / index / clear). Conform to `ZoneLifecycle` → also `HandlerTests.GameStateHandlerTests.zoneLeftClearsAllRegisteredStores` |
+| New `InboundMessageHandler`                         | `HandlerTests` for side effects beyond apply; if it triggers an auto-loop or wakes a coordinator, assert that explicitly |
+| New `WireCommand`                                   | `BridgeTests.RenderJSExpressionTests` — assert `type:'…'`, key shape, and any `CodingKeys` rename (e.g. `subTaskID → taskCode`) |
+| New AMF3 VO / changed trait member order            | `js-tests/encoder.test.js` — pin `Object.keys(parsed)` after `encode→parseEnvelope`. **Load-bearing on the wire.** |
+| New AMF3 parser type or primitive                   | `js-tests/parser.test.js` — roundtrip via `_TSOAMFWriter` ↔ `_TSOAMFParser` |
+| New classifier rule / numeric subtype               | `js-tests/classifier.test.js` (subtype tables, `classifySpec` priority, `learnFromOutbound`) |
+| New skill / level gate on a task                    | `AvailabilityTests` — both the gate predicate and the `TaskCode.isAvailable(for:playerLevel:)` delegation |
+| New `SpecialistKindPolicy` conformer                | `AvailabilityTests` — `defaultTaskCode`, `taskLabel`, `isAvailable` for every code the policy claims |
+| New JSON-loaded registry (`ResourceLoader` consumer)| `RegistryTests` — happy path via `MockResourceLoader`, **plus missing-file and malformed-JSON paths** |
+| New `JSONFileStoring` consumer                      | `StoreTests` or `TradeTests` — use `MockJSONFileStore`; assert both load-from-persisted and the first-time-write path |
+| New auto-loop strategy (`AutoLoopStrategy`)         | `CoordinatorTests` — candidates filter, `reDispatchDelay`, settings persistence via `MockKeyValueStore` |
+| New pure utility / formatter / normalizer           | `UtilityTests` |
+| Changed `SpecialistsDiffer` invariants              | `DifferTests` — both same-shape and reshape branches |
+| New dispatch port (`*DispatchPort`)                 | Extend `CapturingDispatcher` to conform; assert the produced `WireCommand` shape |
+
+### Test anti-patterns
+
+- **Don't spin up `AppEnvironment` in a test.** It exists to wire production. Fake the narrow seam your code depends on (`*Port`, `Logger`, `KeyValueStore`, `ResourceLoader`, `JSONFileStoring`, `DurationEstimator`) — that seam is the point of the seam.
+- **Don't mock `BridgeSender`.** Coordinators depend on `SpecialistDispatchPort` / `BuffDispatchPort` / `TradeDispatchPort`. Use `CapturingDispatcher` and assert on the captured `WireCommand`.
+- **Don't add `module.exports` shims to JS modules** to make them importable in Node. The vm sandbox in `js-tests/loadModule.js` is the test seam; if a new module needs a global you haven't stubbed, add it to `createAMFSandbox()`.
+- **Don't gate tests on real wall time.** Use `BulkDispatcher(interCallDelayNs: 0)` and `FakeDurationEstimator`. The 80 ms production constant has its own smoke test in `UtilityTests`; don't re-litigate it elsewhere.
+- **Don't write UI tests.** There's no UI test target, and Unity's wasm is opaque to JS (see "Unity UI refresh dead end"). Test the model/view-model state the panel reads, not the rendered view.
+
+### CI
+
+- `.github/workflows/ci.yml` runs on every `pull_request` event (push to any branch with an open PR). Two jobs run in parallel:
+  - **`Build & Test`** on `macos-26` — ad-hoc signs (`CODE_SIGN_IDENTITY=-`, `CODE_SIGNING_REQUIRED=NO`), then `xcodebuild build` followed by `xcodebuild test`.
+  - **`JS Tests`** on `ubuntu-latest` — `npm install` + `npm test` (Vitest) on Node 22.
+- `concurrency` cancels superseded runs on the same PR branch.
+- **Branch protection** (configured in the GitHub UI, not YAML): require both `Build & Test` and `JS Tests` on `main` to block merges on red CI.
 
 ## What does NOT exist yet
 
