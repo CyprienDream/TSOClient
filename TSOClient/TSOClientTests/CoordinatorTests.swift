@@ -473,6 +473,91 @@ struct BuffDispatchCoordinatorTests {
         #expect(dispatcher.sent.isEmpty)
     }
 
+    @Test func buffAllSkipsBuildingsAlreadyBuffed() async {
+        // Grid 10 and 30 are unbuffed; grid 20 already carries an active buff.
+        // Dispatch must hit only the unbuffed grids to avoid wasting stacks
+        // against buildings the in-game UI would refuse to re-buff.
+        let buffs = makeBuffsStore(buffName: "ProductivityBuffLvl3")
+        let buildings = BuildingsStore()
+        buildings.apply(InboundMessage.BuildingsPayload(items: [
+            .init(gridIndex: 10, skin: "WoodCutter_01", uid1: 10, uid2: 0, activeBuff: nil),
+            .init(gridIndex: 20, skin: "WoodCutter_01", uid1: 20, uid2: 0, activeBuff: "ProductivityBuffLvl3"),
+            .init(gridIndex: 30, skin: "WoodCutter_01", uid1: 30, uid2: 0, activeBuff: nil),
+        ]))
+        let dispatcher = CapturingDispatcher()
+        let coord = BuffDispatchCoordinator(
+            buffsStore: buffs,
+            buildingsStore: buildings,
+            dispatcher: dispatcher,
+            classifier: .empty,
+            bulk: BulkDispatcher(interCallDelayNs: 0),
+            logger: MockLogger())
+
+        let task = coord.buffAll(group: buildings.items, buffName: "ProductivityBuffLvl3")
+        await task?.value
+
+        let grids = dispatcher.sent.compactMap { ($0 as? DispatchBuffCommand)?.targetGrid }
+        #expect(Set(grids) == Set([10, 30]))
+    }
+
+    @Test func buffAllWhenEveryBuildingIsBuffedIsNoOp() async {
+        let buffs = makeBuffsStore(buffName: "ProductivityBuffLvl3")
+        let buildings = BuildingsStore()
+        buildings.apply(InboundMessage.BuildingsPayload(items: [
+            .init(gridIndex: 10, skin: "WoodCutter_01", uid1: 10, uid2: 0, activeBuff: "ProductivityBuffLvl3"),
+            .init(gridIndex: 20, skin: "WoodCutter_01", uid1: 20, uid2: 0, activeBuff: "ProductivityBuffLvl3"),
+        ]))
+        let dispatcher = CapturingDispatcher()
+        let coord = BuffDispatchCoordinator(
+            buffsStore: buffs,
+            buildingsStore: buildings,
+            dispatcher: dispatcher,
+            classifier: .empty,
+            bulk: BulkDispatcher(interCallDelayNs: 0),
+            logger: MockLogger())
+
+        let task = coord.buffAll(group: buildings.items, buffName: "ProductivityBuffLvl3")
+        await task?.value
+
+        #expect(task == nil)
+        #expect(dispatcher.sent.isEmpty)
+    }
+
+    @Test func buffAllGroupsSkipsBuffedAcrossCategories() async {
+        // Two categories. Lumber has one buffed + one unbuffed; Stone has
+        // both unbuffed. Master dispatch must touch the three unbuffed grids
+        // and leave the already-buffed one alone.
+        let buffs = makeBuffsStore(buffName: "ProductivityBuffLvl3")
+        let buildings = BuildingsStore()
+        buildings.apply(InboundMessage.BuildingsPayload(items: [
+            .init(gridIndex: 10, skin: "WoodCutter_01", uid1: 10, uid2: 0, activeBuff: "ProductivityBuffLvl3"),
+            .init(gridIndex: 11, skin: "WoodCutter_01", uid1: 11, uid2: 0, activeBuff: nil),
+            .init(gridIndex: 20, skin: "Mason_01",      uid1: 20, uid2: 0, activeBuff: nil),
+            .init(gridIndex: 21, skin: "Mason_01",      uid1: 21, uid2: 0, activeBuff: nil),
+        ]))
+        let categories = BuildingCategoryRegistry(categories: [
+            BuildingCategory(displayName: "Lumber", skinBases: ["WoodCutter"], group: "Wood"),
+            BuildingCategory(displayName: "Stone",  skinBases: ["Mason"],      group: "Masons"),
+        ])
+        let dispatcher = CapturingDispatcher()
+        let coord = BuffDispatchCoordinator(
+            buffsStore: buffs,
+            buildingsStore: buildings,
+            dispatcher: dispatcher,
+            classifier: .empty,
+            categoryRegistry: categories,
+            bulk: BulkDispatcher(interCallDelayNs: 0),
+            logger: MockLogger())
+        let snapshot = coord.groups
+        coord.selectMasterBuff("ProductivityBuffLvl3", across: snapshot)
+
+        let task = coord.buffAllGroups(snapshot: snapshot)
+        await task?.value
+
+        let grids = dispatcher.sent.compactMap { ($0 as? DispatchBuffCommand)?.targetGrid }
+        #expect(Set(grids) == Set([11, 20, 21]))
+    }
+
     @Test func applyDefaultsResolvesSubgroupOrFallsBackToStaticDefault() {
         // Three categories exercising every resolution path:
         //   - Copper Mine has a subgroup entry "Aunt Irma's Basket" →
