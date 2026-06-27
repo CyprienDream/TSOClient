@@ -111,4 +111,149 @@ struct ExplorerDurationRegistryTests {
         #expect(buffed != nil)
         #expect(abs((buffed ?? 0) - 14688) < 0.0001)
     }
+
+    @Test func subtypeTimeBonusScalesEstimate() {
+        // MasterExplorer (subTypeId 4, bonus=200) halves task time vs basic.
+        // treasureShort: 21600 × 100 / 200 = 10800.
+        let code = TaskCode(actionType: 1, subTaskID: 0)
+        let basic   = ExplorerDurationRegistry.estimate(task: code, subTypeId: 1, skills: [])
+        let premium = ExplorerDurationRegistry.estimate(task: code, subTypeId: 4, skills: [])
+        #expect(basic == 21600)
+        #expect(premium == 10800)
+    }
+
+    @Test func unknownSubtypeReturnsNil() {
+        let code = TaskCode(actionType: 1, subTaskID: 0)
+        #expect(ExplorerDurationRegistry.estimate(task: code, subTypeId: 9999, skills: []) == nil)
+    }
+
+    @Test func unknownTaskCodeReturnsNil() {
+        let code = TaskCode(actionType: 7, subTaskID: 99)   // not in baseDurations
+        #expect(ExplorerDurationRegistry.estimate(task: code, subTypeId: 1, skills: []) == nil)
+    }
+
+    @Test func skillScopeOnlyAppliesToMatchingTask() {
+        // Pilgrimage (skillId=23, scope=treasure_long) lvl 3 → 15% reduction.
+        // Should reduce treasureLong but not treasureShort or adventureLong.
+        let skills = [SpecialistSkill(id: 23, level: 3)]
+        let long  = TaskCode(actionType: 1, subTaskID: 2)
+        let short = TaskCode(actionType: 1, subTaskID: 0)
+        let adv   = TaskCode(actionType: 2, subTaskID: 2)
+        let longUnreduced  = ExplorerDurationRegistry.estimate(task: long,  subTypeId: 1, skills: [])!
+        let longReduced    = ExplorerDurationRegistry.estimate(task: long,  subTypeId: 1, skills: skills)!
+        let shortUnreduced = ExplorerDurationRegistry.estimate(task: short, subTypeId: 1, skills: [])!
+        let shortStill     = ExplorerDurationRegistry.estimate(task: short, subTypeId: 1, skills: skills)!
+        let advUnreduced   = ExplorerDurationRegistry.estimate(task: adv,   subTypeId: 1, skills: [])!
+        let advStill       = ExplorerDurationRegistry.estimate(task: adv,   subTypeId: 1, skills: skills)!
+
+        #expect(longReduced < longUnreduced)
+        #expect(abs(shortStill - shortUnreduced) < 0.0001)
+        #expect(abs(advStill   - advUnreduced)   < 0.0001)
+    }
+
+    @Test func zeroLevelSkillsIgnored() {
+        // Skill carried with level=0 must be a no-op.
+        let code = TaskCode(actionType: 1, subTaskID: 0)
+        let bare    = ExplorerDurationRegistry.estimate(task: code, subTypeId: 1, skills: [])
+        let zeroed  = ExplorerDurationRegistry.estimate(
+            task: code, subTypeId: 1, skills: [SpecialistSkill(id: 36, level: 0)])
+        #expect(bare == zeroed)
+    }
+}
+
+@Suite("BuildingCategoryRegistry")
+struct BuildingCategoryRegistryTests {
+
+    @Test func loadDecodesFromMockResourceLoader() {
+        let loader = MockResourceLoader()
+        loader.setJSON("""
+        [
+          { "displayName": "Stone Mason", "skinBases": ["Mason"],   "group": "Masons" },
+          { "displayName": "Copper Mine", "skinBases": ["BronzeMine"], "group": "Mines" }
+        ]
+        """, name: "building-categories")
+        let registry = BuildingCategoryRegistry.load(loader: loader, logger: MockLogger())
+        #expect(registry.categories.count == 2)
+        #expect(registry.categories[0].displayName == "Stone Mason")
+        #expect(registry.categories[1].skinBases == ["BronzeMine"])
+    }
+
+    @Test func missingFileReturnsEmpty() {
+        let registry = BuildingCategoryRegistry.load(
+            loader: MockResourceLoader(), logger: MockLogger())
+        #expect(registry.categories.isEmpty)
+    }
+
+    @Test func malformedJSONReturnsEmpty() {
+        let loader = MockResourceLoader()
+        loader.setJSON("{ not json", name: "building-categories")
+        let registry = BuildingCategoryRegistry.load(loader: loader, logger: MockLogger())
+        #expect(registry.categories.isEmpty)
+    }
+}
+
+@Suite("BuildingGroup.from")
+struct BuildingGroupFromTests {
+
+    @Test func mapsKnownRawValuesToCases() {
+        #expect(BuildingGroup.from("Mines")       == .mines)
+        #expect(BuildingGroup.from("Wood")        == .wood)
+        #expect(BuildingGroup.from("Bookbinder")  == .bookbinder)
+    }
+
+    @Test func unknownAndNilFallToOther() {
+        #expect(BuildingGroup.from(nil)           == .other)
+        #expect(BuildingGroup.from("Mystery")     == .other)
+        #expect(BuildingGroup.from("")            == .other)
+    }
+}
+
+@Suite("BuffPanelConfig")
+struct BuffPanelConfigTests {
+
+    @Test func loadDecodesSubgroupsAndIgnoredLists() {
+        let loader = MockResourceLoader()
+        loader.setJSON("""
+        {
+          "subgroups": {
+            "Stone Mason": "Aunt Irma's Feast",
+            "Copper Mine": ""
+          },
+          "ignored": {
+            "exact": ["WatchTower"],
+            "containsCaseInsensitive": ["garrison"]
+          }
+        }
+        """, name: "buff-panel-config")
+        let cfg = BuffPanelConfig.load(loader: loader, logger: MockLogger())
+
+        #expect(cfg.defaultBuffDisplayName(forSubgroup: "Stone Mason") == "Aunt Irma's Feast")
+        #expect(cfg.defaultBuffDisplayName(forSubgroup: "Copper Mine") == "")
+        #expect(cfg.defaultBuffDisplayName(forSubgroup: "Mystery") == nil)
+    }
+
+    @Test func shouldIgnoreMatchesExactAndCaseInsensitiveContains() {
+        let cfg = BuffPanelConfig(
+            subgroups: [:],
+            ignoredExact: ["WatchTower"],
+            ignoredContains: ["GARRISON"])
+
+        #expect(cfg.shouldIgnore(skinBase: "WatchTower"))
+        #expect(cfg.shouldIgnore(skinBase: "GreatHall_garrison"))   // case-insensitive
+        #expect(!cfg.shouldIgnore(skinBase: "Mason"))
+        #expect(!cfg.shouldIgnore(skinBase: "watchtower"))          // exact is case-sensitive
+    }
+
+    @Test func missingFileReturnsEmptyConfig() {
+        let cfg = BuffPanelConfig.load(loader: MockResourceLoader(), logger: MockLogger())
+        #expect(cfg.subgroups.isEmpty)
+        #expect(!cfg.shouldIgnore(skinBase: "Anything"))
+    }
+
+    @Test func malformedJSONReturnsEmptyConfig() {
+        let loader = MockResourceLoader()
+        loader.setJSON("{not json", name: "buff-panel-config")
+        let cfg = BuffPanelConfig.load(loader: loader, logger: MockLogger())
+        #expect(cfg.subgroups.isEmpty)
+    }
 }
