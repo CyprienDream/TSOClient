@@ -124,6 +124,24 @@ final class BuffDispatchCoordinator {
         }
     }
 
+    // `groupedSnapshot` filtered by a user-supplied search query. Match is a
+    // case-insensitive substring check against each category's display name;
+    // whitespace-only queries are treated as empty (returns the full snapshot
+    // unchanged). Sections with no surviving categories are dropped.
+    func filteredGroupedSnapshot(
+        matching query: String
+    ) -> [(group: BuildingGroup, items: [(category: BuildingCategory, buildings: [BuildingsStore.BuildingItem])])] {
+        let sections = groupedSnapshot
+        let trimmed = query.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return sections }
+        return sections.compactMap { section in
+            let items = section.items.filter {
+                $0.category.displayName.localizedCaseInsensitiveContains(trimmed)
+            }
+            return items.isEmpty ? nil : (section.group, items)
+        }
+    }
+
     // Seed `selectedBuff` with each category's configured default the first
     // time a category appears, but only if the buff exists in inventory and
     // the user hasn't already picked something. Pure side-effect on

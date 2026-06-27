@@ -631,6 +631,68 @@ struct BuffDispatchCoordinatorTests {
         #expect(names == ["Stone Mason"])
     }
 
+    // Shared fixture for filter tests: three categories across three groups,
+    // chosen so name-based filters can target each one independently.
+    private func makeFilterCoord() -> BuffDispatchCoordinator {
+        let buildings = BuildingsStore()
+        buildings.apply(InboundMessage.BuildingsPayload(items: [
+            .init(gridIndex: 1, skin: "WoodCutter_01", uid1: 1, uid2: 0, activeBuff: nil),
+            .init(gridIndex: 2, skin: "Mason_01",      uid1: 2, uid2: 0, activeBuff: nil),
+            .init(gridIndex: 3, skin: "BronzeMine_01", uid1: 3, uid2: 0, activeBuff: nil),
+        ]))
+        let categories = BuildingCategoryRegistry(categories: [
+            BuildingCategory(displayName: "Wood Cutter", skinBases: ["WoodCutter"], group: "Wood"),
+            BuildingCategory(displayName: "Stone Mason", skinBases: ["Mason"],      group: "Masons"),
+            BuildingCategory(displayName: "Copper Mine", skinBases: ["BronzeMine"], group: "Mines"),
+        ])
+        return BuffDispatchCoordinator(
+            buffsStore: BuffsStore(naming: .empty),
+            buildingsStore: buildings,
+            dispatcher: CapturingDispatcher(),
+            classifier: .empty,
+            categoryRegistry: categories,
+            logger: MockLogger())
+    }
+
+    @Test func filteredSnapshotEmptyQueryReturnsEverything() {
+        let coord = makeFilterCoord()
+        let all = coord.groupedSnapshot.flatMap { $0.items }.map(\.category.displayName)
+        let filtered = coord.filteredGroupedSnapshot(matching: "")
+            .flatMap { $0.items }.map(\.category.displayName)
+        #expect(Set(filtered) == Set(all))
+        #expect(filtered.count == all.count)
+    }
+
+    @Test func filteredSnapshotWhitespaceQueryReturnsEverything() {
+        let coord = makeFilterCoord()
+        let all = coord.groupedSnapshot.flatMap { $0.items }.map(\.category.displayName)
+        let filtered = coord.filteredGroupedSnapshot(matching: "   \n\t  ")
+            .flatMap { $0.items }.map(\.category.displayName)
+        #expect(Set(filtered) == Set(all))
+    }
+
+    @Test func filteredSnapshotIsCaseInsensitiveSubstring() {
+        let coord = makeFilterCoord()
+        let names = coord.filteredGroupedSnapshot(matching: "mAsOn")
+            .flatMap { $0.items }.map(\.category.displayName)
+        #expect(names == ["Stone Mason"])
+    }
+
+    @Test func filteredSnapshotMatchesAcrossSections() {
+        // "mine" appears in only one category ("Copper Mine"); the section
+        // it belongs to should survive, and the other two should be dropped.
+        let coord = makeFilterCoord()
+        let sections = coord.filteredGroupedSnapshot(matching: "mine")
+        #expect(sections.count == 1)
+        #expect(sections.first?.items.map(\.category.displayName) == ["Copper Mine"])
+    }
+
+    @Test func filteredSnapshotNoMatchesReturnsEmpty() {
+        let coord = makeFilterCoord()
+        let sections = coord.filteredGroupedSnapshot(matching: "fishery")
+        #expect(sections.isEmpty)
+    }
+
     @Test func buildingBuffsFilterUsesClassifier() {
         let buffs = BuffsStore(naming: .empty)
         let payload = InboundMessage.BuffsPayload(items: [
