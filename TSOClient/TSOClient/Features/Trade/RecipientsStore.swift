@@ -62,9 +62,14 @@ final class RecipientsStore {
                                      online: g.online, sources: [.guild])
             }
         }
-        recipients = byID.values.sorted {
-            if $0.username.isEmpty != $1.username.isEmpty { return !$0.username.isEmpty }
-            return $0.username.localizedCaseInsensitiveCompare($1.username) == .orderedAscending
-        }
+        recipients = byID.values
+            // Drop tombstoned accounts the game still ships in friend / guild
+            // rosters (username = "DeletedUser…"). They can't be traded with
+            // and clutter the picker.
+            .filter { !$0.username.hasPrefix("DeletedUser") }
+            .sorted {
+                if $0.username.isEmpty != $1.username.isEmpty { return !$0.username.isEmpty }
+                return $0.username.localizedCaseInsensitiveCompare($1.username) == .orderedAscending
+            }
     }
 }

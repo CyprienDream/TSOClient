@@ -49,8 +49,26 @@ final class TradeCoordinator {
             lastSendStatus = "Fill in all fields."
             return
         }
-        let name = recipients.recipient(id: selectedRecipientID)?.username
-            ?? "(id \(selectedRecipientID))"
+        let name = recipientName()
+        dispatchPair(name: name, returning: false)
+        lastSendStatus = "Sent to \(name)."
+    }
+
+    // Fires the form trade, then a mirror trade with offer/cost swapped.
+    // Use case: a "return" trade where the same partner can hand back what
+    // they were sent — first call moves resources A→B, second pre-stages
+    // the B→A return offer using the same form figures.
+    func sendReturn() {
+        guard canSend else {
+            lastSendStatus = "Fill in all fields."
+            return
+        }
+        let name = recipientName()
+        dispatchPair(name: name, returning: true)
+        lastSendStatus = "Sent return pair to \(name)."
+    }
+
+    private func dispatchPair(name: String, returning: Bool) {
         logger.log("[Trade] send to \(name) — " +
                    "\(offerAmount)×\(offerResource) for \(costsAmount)×\(costsResource)")
         dispatcher.dispatchTrade(
@@ -59,6 +77,19 @@ final class TradeCoordinator {
             costsResource: costsResource, costsAmount: costsAmount,
             slotType: 4 // private trade
         )
-        lastSendStatus = "Sent to \(name)."
+        guard returning else { return }
+        logger.log("[Trade] return to \(name) — " +
+                   "\(costsAmount)×\(costsResource) for \(offerAmount)×\(offerResource)")
+        dispatcher.dispatchTrade(
+            receipientId: selectedRecipientID,
+            offerResource: costsResource, offerAmount: costsAmount,
+            costsResource: offerResource, costsAmount: offerAmount,
+            slotType: 4
+        )
+    }
+
+    private func recipientName() -> String {
+        recipients.recipient(id: selectedRecipientID)?.username
+            ?? "(id \(selectedRecipientID))"
     }
 }
