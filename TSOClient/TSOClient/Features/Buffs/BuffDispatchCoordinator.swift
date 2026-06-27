@@ -183,13 +183,21 @@ final class BuffDispatchCoordinator {
     }
 
     // Dispatch the same buff stack uid to every building in the group.
-    // The server decrements the stack amount on each call. Returned Task lets
-    // tests await completion.
+    // The server decrements the stack amount on each call. Buildings already
+    // carrying an active buff are skipped — the in-game UI refuses to re-buff
+    // a buffed building, and the server would still consume a stack if we did
+    // it via our injection. Returned Task lets tests await completion.
     @discardableResult
     func buffAll(group: [BuildingsStore.BuildingItem], buffName: String) -> Task<Void, Never>? {
         guard let buff = buffsStore.item(for: buffName) else { return nil }
-        return bulk.run(items: group) { [self] i, building in
-            logger.log("[BuffAll] \(i + 1)/\(group.count) grid=\(building.gridIndex) " +
+        let candidates = group.filter { $0.activeBuff == nil }
+        guard !candidates.isEmpty else {
+            logger.log("[BuffAll] all \(group.count) buildings already buffed; skipping")
+            return nil
+        }
+        let total = candidates.count
+        return bulk.run(items: candidates) { [self] i, building in
+            logger.log("[BuffAll] \(i + 1)/\(total) grid=\(building.gridIndex) " +
                        "buff=\(buff.uid1):\(buff.uid2)")
             dispatcher.dispatchBuff(
                 buffUid1: buff.uid1,
@@ -200,7 +208,8 @@ final class BuffDispatchCoordinator {
 
     // Dispatch each group's own `selectedBuff` to its buildings. Groups
     // without a selection (or whose selection is missing from inventory) are
-    // skipped. Returns nil if nothing is dispatchable.
+    // skipped, as are buildings that already carry an active buff (see
+    // `buffAll`). Returns nil if nothing is dispatchable.
     @discardableResult
     func buffAllGroups(snapshot: [(category: BuildingCategory, buildings: [BuildingsStore.BuildingItem])]) -> Task<Void, Never>? {
         struct Step { let building: BuildingsStore.BuildingItem; let buff: BuffsStore.BuffItem }
@@ -210,7 +219,7 @@ final class BuffDispatchCoordinator {
             if group.category.group == BuildingGroup.unmapped.rawValue { continue }
             let name = selectedBuff[group.category.id] ?? ""
             guard !name.isEmpty, let buff = buffsStore.item(for: name) else { continue }
-            for b in group.buildings {
+            for b in group.buildings where b.activeBuff == nil {
                 steps.append(Step(building: b, buff: buff))
             }
         }

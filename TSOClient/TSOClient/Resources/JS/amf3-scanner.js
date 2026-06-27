@@ -973,17 +973,25 @@
                         '[AMF3:bldg:exemplar] skin=' + bSkin + ' | ' + bFields);
                     loggedExemplar = true;
                 }
-                // Extract the first currently-applied buff name on this building.
+                // Extract a "currently buffed" marker for this building. The
+                // entry is a dBuffApplianceVO which carries only a numeric
+                // `buffID` — there is no name string on the appliance itself.
+                // We need a non-null sentinel so the Swift skip-if-buffed
+                // filter (BuffDispatchCoordinator) fires; prefer name when
+                // present, fall back to buffID, then a generic marker.
                 var activeBuff = null;
                 var bBuffList = unwrapCollection(b.buffs);
-                if (bBuffList.length > 0) {
-                    var bf0 = bBuffList[0];
-                    if (bf0 && typeof bf0.buffName_string === 'string') {
+                for (var bbi = 0; bbi < bBuffList.length; bbi++) {
+                    var bf0 = bBuffList[bbi];
+                    if (!bf0) continue;
+                    if (typeof bf0.buffName_string === 'string' && bf0.buffName_string.length > 0) {
                         activeBuff = bf0.buffName_string;
-                    } else if (!loggedExemplar) {
-                        window._tsoDiagLog(
-                            '[AMF3:bldg:buff] ' + JSON.stringify(bf0, null, 2).slice(0, 300));
+                    } else if (typeof bf0.buffID === 'number') {
+                        activeBuff = 'buffID:' + bf0.buffID;
+                    } else {
+                        activeBuff = '<active>';
                     }
+                    break;
                 }
                 loggedExemplar = true;
                 buildingItems.push({
