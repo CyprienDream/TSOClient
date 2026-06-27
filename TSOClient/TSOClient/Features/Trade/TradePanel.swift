@@ -69,14 +69,13 @@ struct TradePanel: View {
         let selected = recipientsStore.recipient(id: coordinator.selectedRecipientID)
         let label = selected.map { display($0) }
             ?? "(id \(coordinator.selectedRecipientID))"
+        let options = recipients.map {
+            SearchableMenu<Int>.Option(id: $0.userID, title: display($0))
+        }
         return VStack(alignment: .leading, spacing: 4) {
             Text("Recipient").font(.caption).foregroundStyle(.secondary)
-            Menu {
-                ForEach(recipients) { r in
-                    Button(display(r)) { coordinator.selectedRecipientID = r.userID }
-                }
-            } label: {
-                Text(label).frame(maxWidth: .infinity, alignment: .leading)
+            SearchableMenu(label: label, options: options) { id in
+                coordinator.selectedRecipientID = id
             }
         }
     }
@@ -93,17 +92,17 @@ struct TradePanel: View {
         let entries = resourcesStore.entries
         let selectedLabel = entries.first { $0.name == resourceBinding.wrappedValue }?.displayName
                             ?? resourceBinding.wrappedValue
+        let options = entries.map {
+            SearchableMenu<String>.Option(
+                id: $0.name,
+                title: $0.confirmed ? $0.displayName : "\($0.displayName) ?"
+            )
+        }
         return VStack(alignment: .leading, spacing: 4) {
             Text(title).font(.caption).foregroundStyle(.secondary)
             HStack(spacing: 6) {
-                Menu {
-                    ForEach(entries) { entry in
-                        Button(entry.confirmed ? entry.displayName : "\(entry.displayName) ?") {
-                            resourceBinding.wrappedValue = entry.name
-                        }
-                    }
-                } label: {
-                    Text(selectedLabel).frame(maxWidth: .infinity, alignment: .leading)
+                SearchableMenu(label: selectedLabel, options: options) { name in
+                    resourceBinding.wrappedValue = name
                 }
                 TextField("amount",
                           value: amountBinding,
@@ -115,12 +114,19 @@ struct TradePanel: View {
     }
 
     private var sendRow: some View {
-        VStack(alignment: .leading, spacing: 4) {
+        VStack(alignment: .leading, spacing: 6) {
             Button(action: { coordinator.send() }) {
                 Text("Trade")
                     .frame(maxWidth: .infinity)
             }
             .buttonStyle(.borderedProminent)
+            .controlSize(.large)
+            .disabled(!coordinator.canSend)
+            Button(action: { coordinator.sendReturn() }) {
+                Text("Return Trade")
+                    .frame(maxWidth: .infinity)
+            }
+            .buttonStyle(.bordered)
             .controlSize(.large)
             .disabled(!coordinator.canSend)
             if !coordinator.lastSendStatus.isEmpty {

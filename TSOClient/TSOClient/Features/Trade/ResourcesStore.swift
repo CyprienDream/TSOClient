@@ -102,11 +102,17 @@ final class ResourcesStore {
 
     // Insert spaces between camelCase / between letter/digit boundaries so a
     // raw wire name like "EMEventResource" displays as "EM Event Resource".
+    // The "Collectible" prefix is dropped from the label — the wire still
+    // sees the full name, but the dropdown shows "Clue" instead of
+    // "Collectible Clue", since every entry in that family is one.
     private func humanize(_ raw: String) -> String {
+        let stripped = raw.hasPrefix("Collectible") && raw.count > "Collectible".count
+            ? String(raw.dropFirst("Collectible".count))
+            : raw
         var result = ""
-        for (i, ch) in raw.enumerated() {
+        for (i, ch) in stripped.enumerated() {
             if i > 0,
-               let prev = raw[raw.index(raw.startIndex, offsetBy: i - 1)].unicodeScalars.first,
+               let prev = stripped[stripped.index(stripped.startIndex, offsetBy: i - 1)].unicodeScalars.first,
                let cur  = ch.unicodeScalars.first,
                (CharacterSet.lowercaseLetters.contains(prev) && CharacterSet.uppercaseLetters.contains(cur)) ||
                (CharacterSet.letters.contains(prev) && CharacterSet.decimalDigits.contains(cur)) {
