@@ -490,26 +490,25 @@
 
     // ── Home-zone gate ──────────────────────────────────────────────────
     // Features (panel updates, auto-loop) only run on the local player's
-    // own non-adventure zone. We cache `_homeZoneID` on the first home
-    // observation (owner == visitor && no adventureName) and then gate
-    // every subsequent payload by comparing the current auth-ctx zoneID
-    // (updated by amf3-net.js from outbound calls — fires reliably even
-    // when returning home from a cache-hit response carrying no dZoneVO).
-    var _homeZoneID = null;
-
-    function currentAuthZoneID() {
-        var a = window._tsoAuthCtx;
-        return (a && typeof a.zoneID === 'number') ? a.zoneID : null;
-    }
+    // own non-adventure zone. The signal we trust is dZoneVO.{zoneOwner,
+    // zoneVisitor}PlayerID: home ⇔ owner == visitor && no adventureName.
+    // We do NOT gate on the auth-ctx zoneID — when the game issues a
+    // "visit friend" outbound, that request carries the home zoneID, so
+    // auth-ctx still reads home when the friend-zone inbound lands and
+    // the gate would falsely admit friend data.
+    //
+    // Sticky across payloads: incremental updates between zone-loads
+    // don't carry dZoneVO, so we reuse the last observed on-home state.
+    // Default true so the first home zone-load (which sets the bool
+    // explicitly) isn't preceded by a dropped no-zone payload.
+    var _isOnHome = true;
 
     function isOnHome(ctx) {
-        if (_homeZoneID !== null) return currentAuthZoneID() === _homeZoneID;
-        // Cache not yet populated. Only treat the very first home-style
-        // observation (owner == visitor && no adventure) as on-home so we
-        // don't accidentally emit on a friend-island first launch.
-        return ctx.zoneOwnerPlayerID !== null &&
-               ctx.zoneOwnerPlayerID === ctx.zoneVisitorPlayerID &&
-               !ctx.adventureName;
+        if (ctx.zoneOwnerPlayerID !== null && ctx.zoneVisitorPlayerID !== null) {
+            _isOnHome = (ctx.zoneOwnerPlayerID === ctx.zoneVisitorPlayerID) &&
+                        !ctx.adventureName;
+        }
+        return _isOnHome;
     }
 
     function buildResult(ctx) {
@@ -773,19 +772,7 @@
             }
         }
 
-        // Cache the home zoneID the first time we see a home-style payload.
-        // After that, the gate runs purely off auth-ctx.zoneID.
         var onHome = isOnHome(ctx);
-        if (onHome && _homeZoneID === null) {
-            var cur = currentAuthZoneID();
-            if (typeof cur === 'number' && cur > 0) {
-                _homeZoneID = cur;
-                window._tsoHomeZoneID = cur;
-                webkit.messageHandlers.logger.postMessage(
-                    '[HomeZone] cached homeZoneID=' + _homeZoneID
-                );
-            }
-        }
         window._tsoOnHome = onHome;
         if (!onHome) return;  // freeze panel + suppress auto-loop while away
 
