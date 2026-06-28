@@ -3,15 +3,35 @@ import Observation
 
 @Observable
 final class BuildingsStore {
+    static let persistenceFilename = "building-skins.json"
+
+    // On-disk shape: { "version": 1, "skinBases": ["Mason", "Woodcutter", ...] }.
+    struct Persisted: Codable {
+        var version: Int
+        var skinBases: [String]
+    }
+
     var items: [BuildingItem] = []
     // skinBase → buildings, sorted by gridIndex. Rebuilt in `apply` so panel
     // lookups are O(1) dict hits instead of O(N) filters + regex per render.
     private(set) var bySkinBase: [String: [BuildingItem]] = [:]
+    // Union of every wire-confirmed skinBase observed across launches.
+    // Persisted; only grows.
+    private(set) var seenSkinBases: Set<String> = []
 
     private let normalizer: BuildingSkinNormalizer
+    private let store: JSONFileStoring
+    private let logger: Logger
 
-    init(normalizer: BuildingSkinNormalizer = .default) {
+    init(normalizer: BuildingSkinNormalizer = .default,
+         store: JSONFileStoring = JSONFileStore(),
+         logger: Logger = ConsoleLogger()) {
         self.normalizer = normalizer
+        self.store = store
+        self.logger = logger
+        if let persisted = store.load(Persisted.self, from: Self.persistenceFilename) {
+            seenSkinBases = Set(persisted.skinBases)
+        }
     }
 
     struct BuildingItem: Identifiable {
@@ -55,6 +75,20 @@ final class BuildingsStore {
         }
         items = newItems
         bySkinBase = index
+
+        let before = seenSkinBases.count
+        seenSkinBases.formUnion(index.keys)
+        if seenSkinBases.count > before {
+            persist(seenSkinBases)
+            logger.log("[Buildings] +\(seenSkinBases.count - before) new skinBase(s) (\(seenSkinBases.count) total)")
+        }
+    }
+
+    private func persist(_ bases: Set<String>) {
+        store.save(
+            Persisted(version: 1, skinBases: bases.sorted()),
+            to: Self.persistenceFilename
+        )
     }
 
     func clear() {
