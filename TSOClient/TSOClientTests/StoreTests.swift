@@ -72,6 +72,59 @@ struct SpecialistsStoreTests {
         #expect(store.items.isEmpty)
         #expect(learner.taskStartedAt.isEmpty)
     }
+
+    // Re-applying the SAME payload after an optimistic markDispatched would
+    // normally short-circuit on the fingerprint and leave the dispatched flip
+    // in place — but markDispatched invalidates the fingerprint so the wire-
+    // truth (still-idle) re-asserts itself.
+    @Test func markDispatchedInvalidatesFingerprintSoReplayReassertsIdle() {
+        let store = SpecialistsStore()
+        let payload = InboundMessage.SpecialistsPayload(
+            items: [specItem(uid: "1:1", isIdle: true)],
+            playerLevel: nil)
+        store.apply(payload)
+        #expect(store.items[0].isIdle == true)
+
+        store.markDispatched(uid: "1:1", actionType: 0, subTaskId: 5)
+        #expect(store.items[0].isIdle == false)
+        #expect(store.items[0].taskSubTaskId == 5)
+
+        // Same wire payload — without the markDispatched invalidation, the
+        // fingerprint would match and we'd keep the (now stale) optimistic flip.
+        store.apply(payload)
+        #expect(store.items[0].isIdle == true)
+        #expect(store.items[0].taskSubTaskId == nil)
+    }
+
+    // Fingerprint covers task state — a transition from idle→busy on the same
+    // uid must be observed even though uids+count are unchanged.
+    @Test func taskStateChangeOnSameUidStillApplies() {
+        let store = SpecialistsStore()
+        store.apply(.init(items: [specItem(uid: "1:1", isIdle: true)], playerLevel: nil))
+        store.apply(.init(
+            items: [specItem(uid: "1:1", isIdle: false,
+                             collectedTime: 1000, taskActionType: 0, taskSubTaskId: 3)],
+            playerLevel: nil))
+        #expect(store.items[0].isIdle == false)
+        #expect(store.items[0].taskActionType == 0)
+        #expect(store.items[0].taskSubTaskId == 3)
+    }
+
+    @Test func clearResetsFingerprintSoIdenticalPayloadReapplies() {
+        let store = SpecialistsStore()
+        let payload = InboundMessage.SpecialistsPayload(
+            items: [specItem(uid: "1:1", isIdle: true)],
+            playerLevel: nil)
+        store.apply(payload)
+        store.clear()
+        #expect(store.items.isEmpty)
+
+        // After clear, the same wire payload must repopulate — the fingerprint
+        // skip would otherwise leave items empty forever.
+        store.apply(payload)
+        #expect(store.items.count == 1)
+        #expect(store.items[0].id == "1:1")
+    }
 }
 
 // ── BuildingsStore ──────────────────────────────────────────────────────────
@@ -177,6 +230,52 @@ struct BuildingsStoreTests {
         #expect(store.bySkinBase.isEmpty)
         #expect(store.seenSkinBases == ["Mason"])
     }
+
+    // Identical re-apply must be a true no-op — same items, same index, no
+    // additional persistence write. (Persistence is gated on seenSkinBases
+    // growth, so this also indirectly confirms the fingerprint short-circuit
+    // doesn't mis-grow the seen set.)
+    @Test func identicalReapplyIsNoOp() {
+        let file = MockJSONFileStore()
+        let store = BuildingsStore(store: file, logger: MockLogger())
+        let payload = InboundMessage.BuildingsPayload(items: [
+            buildingItem(grid: 1, skin: "Mason_01"),
+            buildingItem(grid: 2, skin: "Woodcutter_03"),
+        ])
+        store.apply(payload)
+        let writesAfterFirst = file.writes.count
+
+        store.apply(payload)
+        #expect(store.items.map(\.gridIndex) == [1, 2])
+        #expect(store.bySkinBase.keys.sorted() == ["Mason", "Woodcutter"])
+        #expect(file.writes.count == writesAfterFirst)
+    }
+
+    // Fingerprint covers activeBuff — flipping just the buff status on a
+    // single building must propagate even though counts + uids match.
+    @Test func activeBuffChangeOnSameBuildingStillApplies() {
+        let store = BuildingsStore()
+        store.apply(.init(items: [
+            buildingItem(grid: 1, skin: "Mason_01", uid1: 1, uid2: 1, activeBuff: nil),
+        ]))
+        store.apply(.init(items: [
+            buildingItem(grid: 1, skin: "Mason_01", uid1: 1, uid2: 1, activeBuff: "ProductivityBuffLvl3"),
+        ]))
+        #expect(store.items[0].activeBuff == "ProductivityBuffLvl3")
+    }
+
+    @Test func clearResetsFingerprintSoIdenticalPayloadReapplies() {
+        let store = BuildingsStore(store: MockJSONFileStore(), logger: MockLogger())
+        let payload = InboundMessage.BuildingsPayload(items: [
+            buildingItem(grid: 1, skin: "Mason_01"),
+        ])
+        store.apply(payload)
+        store.clear()
+        #expect(store.items.isEmpty)
+
+        store.apply(payload)
+        #expect(store.items.count == 1)
+    }
 }
 
 // ── BuffsStore ──────────────────────────────────────────────────────────────
@@ -236,6 +335,46 @@ struct BuffsStoreTests {
         let v2 = store.version
         #expect(v1 != v0)
         #expect(v2 != v1)
+    }
+
+    // version is the @Observable signal panels equate against — when the
+    // wire repeats an identical payload (common on heartbeats) we must not
+    // bump it, otherwise every panel reading it re-renders for nothing.
+    @Test func versionDoesNotBumpOnIdenticalReapply() {
+        let store = BuffsStore(naming: .empty)
+        let payload = InboundMessage.BuffsPayload(items: [
+            buffItem(uid1: 1, uid2: 1, name: "ProductivityBuffLvl3", amount: 5),
+        ])
+        store.apply(payload)
+        let v1 = store.version
+
+        store.apply(payload)
+        #expect(store.version == v1)
+    }
+
+    // Fingerprint includes amount/insertedAt — a re-applied list that differs
+    // by amount only must still bump version + refresh totals.
+    @Test func versionBumpsWhenAmountChanges() {
+        let store = BuffsStore(naming: .empty)
+        store.apply(.init(items: [buffItem(uid1: 1, uid2: 1, name: "X", amount: 5)]))
+        let v1 = store.version
+        store.apply(.init(items: [buffItem(uid1: 1, uid2: 1, name: "X", amount: 9)]))
+        #expect(store.version != v1)
+        #expect(store.totalAmount(for: "X") == 9)
+    }
+
+    @Test func clearResetsFingerprintSoIdenticalPayloadReapplies() {
+        let store = BuffsStore(naming: .empty)
+        let payload = InboundMessage.BuffsPayload(items: [
+            buffItem(uid1: 1, uid2: 1, name: "X", amount: 3),
+        ])
+        store.apply(payload)
+        store.clear()
+        #expect(store.items.isEmpty)
+
+        store.apply(payload)
+        #expect(store.items.count == 1)
+        #expect(store.totalAmount(for: "X") == 3)
     }
 
     @Test func clearEmptiesIndexesAndItems() {
