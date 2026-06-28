@@ -28,7 +28,7 @@ struct AppEnvironment {
             formatter: SpecialistDisplayFormatter(naming: naming),
             learner: SpecialistDurationLearner(logger: logger)
         )
-        self.buildings = BuildingsStore()
+        self.buildings = BuildingsStore(logger: logger)
         self.buffs = BuffsStore(naming: naming)
         let recipients = RecipientsStore()
         self.recipients = recipients

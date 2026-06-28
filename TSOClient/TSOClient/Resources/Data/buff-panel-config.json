@@ -4,10 +4,10 @@
     "Granite Mason":               "Stadium Snacks",
     "Marble Mason":                "Aunt Irma's Feast",
 
-    "Copper Mine":                 "Aunt Irma's Basket",
-    "Iron Mine":                   "Aunt Irma's Basket",
-    "Gold Mine":                   "Aunt Irma's Basket",
-    "Epic Coal Mine":              "Aunt Irma's Basket",
+    "Copper Mine":                 "Aunt Irma's Feast",
+    "Iron Mine":                   "Aunt Irma's Feast",
+    "Gold Mine":                   "Aunt Irma's Feast",
+    "Epic Coal Mine":              "Aunt Irma's Feast",
 
     "Copper Smelter":              "Aunt Irma's Feast",
     "Iron Smelter":                "Aunt Irma's Feast",
@@ -67,7 +67,7 @@
     "Iron Weaponsmith":            "",
     "Steel Weaponsmith":           "",
     "Titanium Weaponsmith":        "",
-    "Platinum Weaponsmith":        "",
+    "Platinum Weaponsmith":        "Aunt Irma's Feast",
     "Archebuse Maker":             "",
     "Cannon Forge":                "",
     "Carpenter":                   "",

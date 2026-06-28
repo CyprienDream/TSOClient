@@ -128,6 +128,55 @@ struct BuildingsStoreTests {
         #expect(store.items.isEmpty)
         #expect(store.bySkinBase.isEmpty)
     }
+
+    @Test func initLoadsPersistedSkinBases() {
+        let file = MockJSONFileStore()
+        let persisted = BuildingsStore.Persisted(version: 1, skinBases: ["Mason", "Woodcutter"])
+        file.files[BuildingsStore.persistenceFilename] =
+            try! JSONEncoder().encode(persisted)
+
+        let store = BuildingsStore(store: file, logger: MockLogger())
+        #expect(store.seenSkinBases == ["Mason", "Woodcutter"])
+    }
+
+    @Test func applyAccumulatesAndPersistsNewSkinBases() {
+        let file = MockJSONFileStore()
+        let store = BuildingsStore(store: file, logger: MockLogger())
+
+        store.apply(.init(items: [
+            buildingItem(grid: 1, skin: "Mason_01"),
+            buildingItem(grid: 2, skin: "Woodcutter_03"),
+        ]))
+        #expect(store.seenSkinBases == ["Mason", "Woodcutter"])
+        #expect(file.writes.count == 1)
+
+        let saved = file.load(BuildingsStore.Persisted.self,
+                              from: BuildingsStore.persistenceFilename)
+        #expect(saved?.skinBases == ["Mason", "Woodcutter"])
+
+        // Re-apply same skinBases: no new write.
+        store.apply(.init(items: [buildingItem(grid: 5, skin: "Mason_07")]))
+        #expect(file.writes.count == 1)
+        #expect(store.seenSkinBases == ["Mason", "Woodcutter"])
+
+        // New skinBase: writes again, prior entries preserved.
+        store.apply(.init(items: [buildingItem(grid: 9, skin: "BronzeMine_01")]))
+        #expect(file.writes.count == 2)
+        #expect(store.seenSkinBases == ["BronzeMine", "Mason", "Woodcutter"])
+    }
+
+    @Test func clearKeepsPersistedSkinBases() {
+        // ZONE_LEFT wipes live items but the persisted catalog must survive
+        // — that's the whole point of persisting it.
+        let file = MockJSONFileStore()
+        let store = BuildingsStore(store: file, logger: MockLogger())
+        store.apply(.init(items: [buildingItem(grid: 1, skin: "Mason_01")]))
+
+        store.clear()
+        #expect(store.items.isEmpty)
+        #expect(store.bySkinBase.isEmpty)
+        #expect(store.seenSkinBases == ["Mason"])
+    }
 }
 
 // ── BuffsStore ──────────────────────────────────────────────────────────────

@@ -201,32 +201,31 @@ struct SpecialistDispatchCoordinatorTests {
         #expect(coord.pendingReDispatches["1:1"] != nil)
     }
 
-    @Test func autoLoopReDispatchFiresAfterEstimateElapses() async {
+    @Test func reDispatchBodyInvokesDispatchOneWithStrategyTaskCode() async {
+        // Deterministic substitute for the wall-clock-driven re-dispatch test:
+        // exercises the wake body directly via `fireReDispatch`. The timer
+        // wiring itself is covered by `autoLoopArmsPerUidTimerWhenEnabled`
+        // (arm) and `autoLoopDisableCancelsPendingReDispatches` (cancel) —
+        // we trust `Task.sleep` + body composition without sleeping on it.
         let store = SpecialistsStore()
         store.items = [makeItem(uid: "1:1", uid1: 1, uid2: 1, kind: .explorer)]
         let dispatcher = CapturingDispatcher()
-        var calls = 0
-        // First arming returns 50ms (long enough to outlast the sweep's
-        // own 0-ns inter-call yield, short enough to keep the test snappy);
-        // second call returns nil so the wake doesn't re-arm and we don't
-        // loop indefinitely.
+        // Estimator returning nil keeps the initial sweep from arming any
+        // wake, so dispatcher.sent.count == 1 is stable to observe.
         let coord = SpecialistDispatchCoordinator(
             store: store, dispatcher: dispatcher,
             bulk: BulkDispatcher(interCallDelayNs: 0),
             logger: MockLogger(),
             defaults: isolatedDefaults(),
-            estimator: FakeDurationEstimator { _, _, _ in
-                calls += 1
-                return calls == 1 ? 0.05 : nil
-            })
-        coord.autoReDispatchBuffer = 0
+            estimator: FakeDurationEstimator { _, _, _ in nil })
         coord.autoExplorerLoopTask = .treasureMedium
         coord.autoExplorerLoopEnabled = true
         await coord.lastAutoLoopTask?.value
         #expect(dispatcher.sent.count == 1)
 
-        let wake = coord.pendingReDispatches["1:1"]
-        await wake?.value
+        await MainActor.run {
+            coord.fireReDispatch(uid: "1:1", strategyId: "auto-loop-explorer")
+        }
 
         #expect(dispatcher.sent.count == 2)
         let second = dispatcher.sent[1] as? DispatchSpecialistCommand

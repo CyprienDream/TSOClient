@@ -201,18 +201,24 @@ final class SpecialistDispatchCoordinator {
         pendingReDispatches[uid] = Task { @MainActor [weak self] in
             try? await Task.sleep(nanoseconds: UInt64(max(0, delaySec) * 1_000_000_000))
             if Task.isCancelled { return }
-            guard let self else { return }
-            self.pendingReDispatches.removeValue(forKey: uid)
-            // Original behaviour: at wake, re-check enabled/kind/skill but
-            // not isIdle (server-side state may not have flipped yet).
-            guard let strategy = self.strategies[strategyId],
-                  let current = self.store.items.first(where: { $0.id == uid }),
-                  strategy.matches(spec: current, playerLevel: self.store.playerLevel)
-            else { return }
-            let next = strategy.taskCode(for: current)
-            self.logger.log("[AutoLoop] timer wake — re-dispatching uid=\(uid) to \(strategy.taskLogLabel)")
-            self.dispatchOne(spec: current, taskCode: next, targetGrid: 0)
+            self?.fireReDispatch(uid: uid, strategyId: strategyId)
         }
+    }
+
+    // Wake-body, extracted so tests can drive the re-dispatch path without
+    // depending on a real Task.sleep elapsing. Production callers never touch
+    // this directly — it runs from the per-uid timer scheduled above.
+    func fireReDispatch(uid: String, strategyId: String) {
+        pendingReDispatches.removeValue(forKey: uid)
+        // At wake, re-check enabled/kind/skill but not isIdle (server-side
+        // state may not have flipped yet).
+        guard let strategy = strategies[strategyId],
+              let current = store.items.first(where: { $0.id == uid }),
+              strategy.matches(spec: current, playerLevel: store.playerLevel)
+        else { return }
+        let next = strategy.taskCode(for: current)
+        logger.log("[AutoLoop] timer wake — re-dispatching uid=\(uid) to \(strategy.taskLogLabel)")
+        dispatchOne(spec: current, taskCode: next, targetGrid: 0)
     }
 
     private func cancelAllPendingReDispatches() {
