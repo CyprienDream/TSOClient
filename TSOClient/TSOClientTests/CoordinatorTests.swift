@@ -56,6 +56,37 @@ struct SpecialistDispatchCoordinatorTests {
         #expect(store.items[0].taskSubTaskId == 3)
     }
 
+    @Test func explorerDispatchShowsBannerAndCoalescesBursts() async {
+        let store = SpecialistsStore()
+        let exp1 = makeItem(uid: "1:1", uid1: 1, uid2: 1, kind: .explorer)
+        let exp2 = makeItem(uid: "2:2", uid1: 2, uid2: 2, kind: .explorer)
+        let geo  = makeItem(uid: "3:3", uid1: 3, uid2: 3, kind: .geologist)
+        store.items = [exp1, exp2, geo]
+        let coord = SpecialistDispatchCoordinator(
+            store: store, dispatcher: CapturingDispatcher(),
+            bulk: BulkDispatcher(interCallDelayNs: 0),
+            logger: MockLogger(),
+            defaults: isolatedDefaults())
+        coord.explorerBannerHideDelay = 0.05
+
+        #expect(coord.explorerBannerText == nil)
+
+        coord.dispatchOne(spec: exp1, taskCode: ExplorerTask.treasureShort.taskCode, targetGrid: 0)
+        #expect(coord.explorerBannerText?.contains("Explorer dispatched") == true)
+        #expect(coord.explorerBannerText?.contains("Treasure: Short") == true)
+
+        coord.dispatchOne(spec: exp2, taskCode: ExplorerTask.treasureShort.taskCode, targetGrid: 0)
+        #expect(coord.explorerBannerText?.hasPrefix("2 explorers dispatched") == true)
+
+        // Geologist dispatch must not retrigger the banner counter.
+        coord.dispatchOne(spec: geo, taskCode: GeologistTask.findStone.taskCode, targetGrid: 0)
+        #expect(coord.explorerBannerText?.hasPrefix("2 explorers dispatched") == true)
+
+        // Banner clears once the hide delay elapses.
+        try? await Task.sleep(nanoseconds: 200_000_000)
+        #expect(coord.explorerBannerText == nil)
+    }
+
     @Test func resolvedTaskCodeFallsBackToDefault() {
         let store = SpecialistsStore()
         let coord = SpecialistDispatchCoordinator(

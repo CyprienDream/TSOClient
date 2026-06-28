@@ -39,6 +39,14 @@ final class SpecialistDispatchCoordinator {
     private(set) var lastAutoLoopTask: Task<Void, Never>?
     private(set) var pendingReDispatches: [String: Task<Void, Never>] = [:]
 
+    // Transient banner surfaced by SpecialistsPanel when explorers are
+    // dispatched (manual row, bulk, or auto-loop). Bursts within
+    // `explorerBannerHideDelay` of the last dispatch coalesce into one banner.
+    private(set) var explorerBannerText: String?
+    var explorerBannerHideDelay: TimeInterval = 2.5
+    private var explorerBannerCount: Int = 0
+    private var explorerBannerHideTask: Task<Void, Never>?
+
     // Geologist auto-loops, keyed by subTypeId. Each enabled entry sweeps its
     // own subtype on its own task — so Stone Cold can loop Granite while
     // Diligent loops Gold. Zone-refresh-only (no per-uid timer) — geologist
@@ -176,7 +184,30 @@ final class SpecialistDispatchCoordinator {
             actionType: taskCode.actionType,
             subTaskID: taskCode.subTaskID,
             targetGrid: targetGrid)
+        if spec.specialistType == .explorer {
+            noteExplorerDispatched(taskCode: taskCode)
+        }
         scheduleAutoReDispatch(spec: spec, taskCode: taskCode)
+    }
+
+    // Coalesces rapid-fire explorer dispatches (bulk / auto-loop) into a single
+    // banner that resets after `explorerBannerHideDelay` seconds of quiet.
+    private func noteExplorerDispatched(taskCode: TaskCode) {
+        explorerBannerCount += 1
+        let n = explorerBannerCount
+        let taskLabel = ExplorerTask.allCases.first { $0.taskCode == taskCode }?.label
+        explorerBannerText = n == 1
+            ? "Explorer dispatched\(taskLabel.map { " · \($0)" } ?? "")"
+            : "\(n) explorers dispatched\(taskLabel.map { " · \($0)" } ?? "")"
+        explorerBannerHideTask?.cancel()
+        let delay = explorerBannerHideDelay
+        explorerBannerHideTask = Task { @MainActor [weak self] in
+            try? await Task.sleep(nanoseconds: UInt64(max(0, delay) * 1_000_000_000))
+            if Task.isCancelled { return }
+            guard let self else { return }
+            self.explorerBannerText = nil
+            self.explorerBannerCount = 0
+        }
     }
 
     // After every dispatch, ask each strategy whether it wants to arm a

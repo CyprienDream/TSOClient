@@ -72,6 +72,15 @@ struct SpecialistsPanel: View {
             }
         }
         .frame(width: 320)
+        .overlay(alignment: .top) {
+            if let text = coordinator.explorerBannerText {
+                ExplorerDispatchBanner(text: text)
+                    .padding(.horizontal, 10)
+                    .padding(.top, 6)
+                    .transition(.move(edge: .top).combined(with: .opacity))
+            }
+        }
+        .animation(.easeInOut(duration: 0.2), value: coordinator.explorerBannerText)
         .onReceive(tick) { now = $0 }
     }
 
@@ -246,6 +255,25 @@ struct SpecialistsPanel: View {
     // per-uid timer that re-fires when the task is predicted to end (so the
     // loop continues mid-session without waiting for a zone reload). Hidden
     // when filtered to a non-explorer view.
+    private struct ExplorerDispatchBanner: View {
+        let text: String
+        var body: some View {
+            HStack(spacing: 6) {
+                Image(systemName: "paperplane.fill")
+                Text(text).font(.caption).bold()
+            }
+            .foregroundStyle(.white)
+            .padding(.horizontal, 10)
+            .padding(.vertical, 6)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(
+                RoundedRectangle(cornerRadius: 6, style: .continuous)
+                    .fill(Color.accentColor.opacity(0.92))
+            )
+            .shadow(color: .black.opacity(0.2), radius: 3, y: 1)
+        }
+    }
+
     @ViewBuilder
     private var autoExplorerLoopSection: some View {
         if filter == nil || filter == .explorer {
