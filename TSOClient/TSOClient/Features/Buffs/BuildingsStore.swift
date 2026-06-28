@@ -18,6 +18,9 @@ final class BuildingsStore {
     // Union of every wire-confirmed skinBase observed across launches.
     // Persisted; only grows.
     private(set) var seenSkinBases: Set<String> = []
+    // Hash of the last applied payload — when the game re-sends an identical
+    // buildings list (common on heartbeats) we skip the rebuild + observer notify.
+    private var lastFingerprint: Int?
 
     private let normalizer: BuildingSkinNormalizer
     private let store: JSONFileStoring
@@ -56,6 +59,9 @@ final class BuildingsStore {
     }
 
     func apply(_ payload: InboundMessage.BuildingsPayload) {
+        let fingerprint = Self.fingerprint(of: payload.items)
+        if fingerprint == lastFingerprint { return }
+        lastFingerprint = fingerprint
         let newItems: [BuildingItem] = payload.items.map {
             BuildingItem(
                 gridIndex: $0.gridIndex,
@@ -94,5 +100,19 @@ final class BuildingsStore {
     func clear() {
         items = []
         bySkinBase = [:]
+        lastFingerprint = nil
+    }
+
+    private static func fingerprint(of items: [InboundMessage.BuildingsPayload.Item]) -> Int {
+        var hasher = Hasher()
+        hasher.combine(items.count)
+        for it in items {
+            hasher.combine(it.gridIndex)
+            hasher.combine(it.uid1)
+            hasher.combine(it.uid2)
+            hasher.combine(it.skin)
+            hasher.combine(it.activeBuff)
+        }
+        return hasher.finalize()
     }
 }
