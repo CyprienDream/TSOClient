@@ -12,6 +12,9 @@ final class BuffsStore {
     private(set) var byBuffName: [String: BuffItem] = [:]
     private(set) var totalAmountByName: [String: Int] = [:]
     private(set) var cachedUniqueTypes: [BuffItem] = []
+    // Hash of the last applied payload — when the game re-sends an identical
+    // buffs list (common on heartbeats) we skip the rebuild + observer notify.
+    private var lastFingerprint: Int?
 
     private let naming: NamingRegistry
 
@@ -41,6 +44,9 @@ final class BuffsStore {
     func item(for name: String) -> BuffItem? { byBuffName[name] }
 
     func apply(_ payload: InboundMessage.BuffsPayload) {
+        let fingerprint = Self.fingerprint(of: payload.items)
+        if fingerprint == lastFingerprint { return }
+        lastFingerprint = fingerprint
         let newItems: [BuffItem] = payload.items.map {
             BuffItem(
                 uid1:         $0.uid1,
@@ -70,6 +76,20 @@ final class BuffsStore {
         byBuffName = [:]
         totalAmountByName = [:]
         cachedUniqueTypes = []
+        lastFingerprint = nil
         version &+= 1
+    }
+
+    private static func fingerprint(of items: [InboundMessage.BuffsPayload.Item]) -> Int {
+        var hasher = Hasher()
+        hasher.combine(items.count)
+        for it in items {
+            hasher.combine(it.uid1)
+            hasher.combine(it.uid2)
+            hasher.combine(it.buffName)
+            hasher.combine(it.amount)
+            hasher.combine(it.insertedAt)
+        }
+        return hasher.finalize()
     }
 }
