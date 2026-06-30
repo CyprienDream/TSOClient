@@ -23,8 +23,13 @@ final class TradeCoordinator {
     var costsAmount: Int = 1
 
     // Lightweight one-shot feedback for the panel: shown after a Trade
-    // press, cleared on next interaction.
+    // press, auto-cleared after `statusVisibleDuration` seconds so the
+    // panel doesn't stay stuck on stale "Sent to …" copy after the next
+    // trade is being composed.
     var lastSendStatus: String = ""
+
+    private static let statusVisibleDuration: TimeInterval = 5
+    private var statusClearTask: Task<Void, Never>?
 
     private let recipients: RecipientsStore
     private let dispatcher: TradeDispatchPort
@@ -46,12 +51,12 @@ final class TradeCoordinator {
 
     func send() {
         guard canSend else {
-            lastSendStatus = "Fill in all fields."
+            setStatus("Fill in all fields.")
             return
         }
         let name = recipientName()
         dispatchPair(name: name, returning: false)
-        lastSendStatus = "Sent to \(name)."
+        setStatus("Sent to \(name).")
     }
 
     // Fires the form trade, then a mirror trade with offer/cost swapped.
@@ -60,12 +65,12 @@ final class TradeCoordinator {
     // the B→A return offer using the same form figures.
     func sendReturn() {
         guard canSend else {
-            lastSendStatus = "Fill in all fields."
+            setStatus("Fill in all fields.")
             return
         }
         let name = recipientName()
         dispatchPair(name: name, returning: true)
-        lastSendStatus = "Sent return pair to \(name)."
+        setStatus("Sent return pair to \(name).")
     }
 
     private func dispatchPair(name: String, returning: Bool) {
@@ -91,5 +96,17 @@ final class TradeCoordinator {
     private func recipientName() -> String {
         recipients.recipient(id: selectedRecipientID)?.username
             ?? "(id \(selectedRecipientID))"
+    }
+
+    private func setStatus(_ message: String) {
+        lastSendStatus = message
+        statusClearTask?.cancel()
+        guard !message.isEmpty else { return }
+        let delay = Self.statusVisibleDuration
+        statusClearTask = Task { @MainActor [weak self] in
+            try? await Task.sleep(nanoseconds: UInt64(delay * 1_000_000_000))
+            if Task.isCancelled { return }
+            self?.lastSendStatus = ""
+        }
     }
 }
