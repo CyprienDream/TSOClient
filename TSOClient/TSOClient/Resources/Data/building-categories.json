@@ -28,6 +28,7 @@
   { "displayName": "Epic Wood Workyard",                "skinBases": ["EpicWorkyardWood"],                       "group": "Wood" },
 
   { "displayName": "Brewery",                           "skinBases": ["Brewery"],                                "group": "Food" },
+  { "displayName": "Magnificent Brewery",               "skinBases": ["BreweryEndless"],                         "group": "Food" },
   { "displayName": "Elite Stable",                      "skinBases": ["EliteStable"],                            "group": "Food" },
   { "displayName": "Stables",                           "skinBases": ["Stable"],                                 "group": "Food" },
   { "displayName": "Butcher",                           "skinBases": ["Butcher"],                                "group": "Food" },
@@ -90,6 +91,10 @@
 
   { "displayName": "Bookbinder",                        "skinBases": ["Bookbinder"],                             "group": "Bookbinder" },
   { "displayName": "Adventure Bookbinder",              "skinBases": ["AdventureBookbinder"],                    "group": "Bookbinder" },
+
+  { "displayName": "Advanced Toolmaker",                "skinBases": ["AdvancedToolmaker"] },
+  { "displayName": "PowderHut",                         "skinBases": ["Powderhut"] },
+  { "displayName": "Toolmaker",                         "skinBases": ["Toolmaker"] },
 
   { "displayName": "Homestead",                         "skinBases": ["Homestead"] },
   { "displayName": "Rabbit Retreat",                    "skinBases": ["RabbitBreeding"] },
