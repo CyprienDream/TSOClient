@@ -104,10 +104,9 @@ struct ResourcesStoreTests {
 
     @Test func freshStoreSeedsFromCatalog() {
         let (store, _, _) = makeStore()
-        // Every curated entry is exposed; none confirmed yet.
-        let names = store.entries.map(\.name)
-        #expect(names.contains("Wood"))
-        #expect(names.contains("Tool"))
+        // Curated entries are exposed with their display-name override; none confirmed yet.
+        let corn = store.entries.first { $0.name == "Corn" }
+        #expect(corn?.displayName == "Wheat")
         #expect(store.entries.allSatisfy { !$0.confirmed })
     }
 

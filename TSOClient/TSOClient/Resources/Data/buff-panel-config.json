@@ -29,6 +29,7 @@
     "Epic Wood Workyard":          "",
 
     "Brewery":                     "Aunt Irma's Feast",
+    "Magnificent Brewery":         "Aunt Irma's Feast",
     "Elite Stable":                "Aunt Irma's Feast",
     "Stables":                     "Aunt Irma's Feast",
     "Butcher":                     "Aunt Irma's Feast",
@@ -92,6 +93,10 @@
     "Bookbinder":                  "",
     "Adventure Bookbinder":        "",
 
+    "Advanced Toolmaker":          "",
+    "PowderHut":                   "",
+    "Toolmaker":                   "",
+
     "Homestead":                   "Aunt Irma's Feast",
     "Rabbit Retreat":              "Aunt Irma's Feast",
     "Mountain Clan Colossus":      "Aunt Irma's Feast"
@@ -128,6 +133,7 @@
       "vases"
     ],
     "containsCaseInsensitive": [
+      "collectible",
       "garrison",
       "residence",
       "mansion",
