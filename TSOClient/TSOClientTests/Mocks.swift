@@ -96,11 +96,13 @@ final class CapturingDispatcher: SpecialistDispatchPort, BuffDispatchPort, Trade
     func dispatchTrade(receipientId: Int,
                        offerResource: String, offerAmount: Int,
                        costsResource: String, costsAmount: Int,
+                       lots: Int,
                        slotType: Int) {
         sent.append(DispatchTradeCommand(
             receipientId: receipientId,
             offerResource: offerResource, offerAmount: offerAmount,
             costsResource: costsResource, costsAmount: costsAmount,
+            lots: lots,
             slotType: slotType))
     }
 }

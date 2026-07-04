@@ -60,6 +60,7 @@ struct TradePanel: View {
                         amountBinding: Binding(
                             get: { coordinator.costsAmount },
                             set: { coordinator.costsAmount = $0 }))
+            lotsRow
             sendRow
         }
         .padding(12)
@@ -129,11 +130,36 @@ struct TradePanel: View {
             .buttonStyle(.bordered)
             .controlSize(.large)
             .disabled(!coordinator.canSend)
+            Button(action: { coordinator.sendPublic() }) {
+                Text("Public trade")
+                    .frame(maxWidth: .infinity)
+            }
+            .buttonStyle(.bordered)
+            .controlSize(.large)
+            .disabled(!coordinator.canSendPublic)
             if !coordinator.lastSendStatus.isEmpty {
                 Text(coordinator.lastSendStatus)
                     .font(.caption2)
                     .foregroundStyle(.secondary)
             }
+        }
+    }
+
+    // Ignored on Trade / Return Trade (those send lots=0). Stepper enforces
+    // 1...4 so the coordinator can trust the value without re-clamping.
+    private var lotsRow: some View {
+        let binding = Binding(
+            get: { coordinator.lots },
+            set: { coordinator.lots = $0 })
+        return VStack(alignment: .leading, spacing: 4) {
+            Text("Lots").font(.caption).foregroundStyle(.secondary)
+            Stepper(value: binding, in: 1...TradeCoordinator.maxLots) {
+                Text("\(coordinator.lots)")
+                    .monospacedDigit()
+            }
+            Text("Applies to public trade only.")
+                .font(.caption2)
+                .foregroundStyle(.secondary)
         }
     }
 }

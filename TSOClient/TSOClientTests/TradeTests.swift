@@ -29,6 +29,7 @@ struct TradeCoordinatorTests {
         coord.offerAmount   = 100
         coord.costsResource = "Wood"
         coord.costsAmount   = 1
+        coord.lots          = 3 // must be ignored on private trade
 
         coord.send()
 
@@ -39,7 +40,61 @@ struct TradeCoordinatorTests {
         #expect(cmd?.offerAmount == 100)
         #expect(cmd?.costsResource == "Wood")
         #expect(cmd?.costsAmount == 1)
+        #expect(cmd?.lots == 0)
         #expect(cmd?.slotType == 4)
+    }
+
+    @Test func sendPublicDispatchesTradeOfficeOffer() {
+        let (coord, dispatcher) = makeCoord()
+        coord.selectedRecipientID = 1234 // must be ignored
+        coord.offerResource = "BronzeSword"
+        coord.offerAmount   = 133
+        coord.costsResource = "Wood"
+        coord.costsAmount   = 1
+        coord.lots          = 2
+
+        coord.sendPublic()
+
+        #expect(dispatcher.sent.count == 1)
+        let cmd = dispatcher.sent[0] as? DispatchTradeCommand
+        #expect(cmd?.receipientId == 0)
+        #expect(cmd?.offerResource == "BronzeSword")
+        #expect(cmd?.offerAmount == 133)
+        #expect(cmd?.costsResource == "Wood")
+        #expect(cmd?.costsAmount == 1)
+        #expect(cmd?.lots == 2)
+        #expect(cmd?.slotType == 0)
+    }
+
+    @Test func sendReturnKeepsLotsZeroOnBothLegs() {
+        let (coord, dispatcher) = makeCoord()
+        coord.selectedRecipientID = 1234
+        coord.lots = 4
+
+        coord.sendReturn()
+
+        #expect(dispatcher.sent.count == 2)
+        let first  = dispatcher.sent[0] as? DispatchTradeCommand
+        let second = dispatcher.sent[1] as? DispatchTradeCommand
+        #expect(first?.lots == 0)
+        #expect(second?.lots == 0)
+        #expect(first?.slotType == 4)
+        #expect(second?.slotType == 4)
+    }
+
+    @Test func sendPublicIgnoresRecipientRequirement() {
+        let (coord, dispatcher) = makeCoord()
+        coord.selectedRecipientID = 0 // canSend would be false; sendPublic still fires
+        coord.sendPublic()
+        #expect(dispatcher.sent.count == 1)
+    }
+
+    @Test func sendPublicRejectsOutOfRangeLots() {
+        let (coord, dispatcher) = makeCoord()
+        coord.lots = 5 // panel Stepper prevents this; guard the invariant anyway
+        coord.sendPublic()
+        #expect(dispatcher.sent.isEmpty)
+        #expect(coord.lastSendStatus == "Fill in all fields.")
     }
 
     @Test func sendShowsValidationStatusWhenFieldsIncomplete() {
