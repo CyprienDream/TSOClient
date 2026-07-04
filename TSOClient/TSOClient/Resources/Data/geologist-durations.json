@@ -2,7 +2,7 @@
   "_doc": "Geologist task duration model. baseDurations in seconds. timeBonus per subtype: integer for a flat speed, or {default, byTask: {'0,N': bonus}} for resource-specific subtypes (Iron-Willed boosts iron only, Stone Cold boosts stone/marble/granite, etc.). skills.reduction: percent per level. Unknown subTypeId or missing skillId → no estimate.",
   "_sources": {
     "math": "mirrors fedorovvl/tso_client user_exp_time_matrix.js convention: real = base * skill_product * 100 / bonus",
-    "baseDurations": "TBD — populate from in-game observation (no canonical wiki table found yet)",
+    "baseDurations": "settlersonlinewiki.eu/en/guides/geologist/ — basic Geologist exploration times (timeBonus=100). Verify against learner divergence logs.",
     "timeBonus": "tsowiki.eu/specialists/geologists/ — wiki notation translated: '+100% speed' = bonus 200, '-67% time' ≈ bonus 300, '+33% speed' ≈ bonus 133. Resource-specific subtypes use byTask. Lovely(40)/Diligent(59)/Chummy(62) not yet pinned.",
     "skills": "settlersonlinewiki.eu/en/science/science-system-geologist/ (20 skills total: 2 time-reducers, 18 drop/bonus skills)"
   },
@@ -20,7 +20,16 @@
   },
 
   "baseDurations": {
-    "_comment": "Populate via observation. Geologist tasks have actionType=0, subTaskID per resource."
+    "_comment": "Basic Geologist (timeBonus=100) exploration times in seconds. Source: settlersonlinewiki.eu/en/guides/geologist/. Actual time = base * skill_product * 100 / timeBonus.",
+    "0,0": 120,
+    "0,1": 300,
+    "0,2": 1800,
+    "0,3": 3600,
+    "0,4": 14400,
+    "0,5": 14400,
+    "0,6": 28800,
+    "0,7": 28800,
+    "0,8": 28800
   },
 
   "timeBonus": {
@@ -44,8 +53,8 @@
   },
 
   "skills": [
-    { "name": "TendentiousGeologist", "skillId": null, "scope": "minerals", "reduction": [10, 20, 30], "_doc": "stone(0,0), marble(0,2), coal(0,5), granite(0,6), saltpetre(0,8)" },
-    { "name": "OreCollector",         "skillId": null, "scope": "ores",     "reduction": [10, 20, 30], "_doc": "copper(0,1), iron(0,3), gold(0,4), titanium(0,7)" }
+    { "name": "TendentiousGeologist", "skillId": 10, "scope": "minerals", "reduction": [10, 20, 30], "_doc": "stone(0,0), marble(0,2), coal(0,5), granite(0,6), saltpetre(0,8)" },
+    { "name": "OreCollector",         "skillId": 17, "scope": "ores",     "reduction": [10, 20, 30], "_doc": "copper(0,1), iron(0,3), gold(0,4), titanium(0,7)" }
   ],
 
   "_dropSkills": {
@@ -86,12 +95,13 @@
     "6":  "NaturalMarbleVein",
     "8":  "TwoIronInOne",
     "10": "TendentiousGeologist",
+    "11": "GoldMiningSurplus",
+    "13": "IronMiningSurplus",
     "14": "NaturalGoldVein",
+    "17": "OreCollector",
     "19": "NaturalBornDigger",
-    "_pool_13_17": ["IronMiningSurplus", "OreCollector"],
     "_unresolved": [
-      "IronMiningSurplus", "OreCollector",
-      "CopperMiningSurplus", "QualityCoalMineshafts", "GoldMiningSurplus",
+      "CopperMiningSurplus", "QualityCoalMineshafts",
       "HiddenCoalStash", "TwoCoalInOne", "QualityGoldMineshafts", "LuckyFind", "NaturesGift"
     ]
   }

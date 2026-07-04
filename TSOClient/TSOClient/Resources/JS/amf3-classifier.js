@@ -32,7 +32,7 @@
         40: 'LovelyGeologist', 42: 'GoldheartedGeologist', 45: 'ArcheologistGeologist',
         49: 'ThoroughGeologist', 59: 'DiligentGeologist', 62: 'ChummyGeologist',
         71: 'SophisticatedGeologist', 73: 'MummifiedGeologist', 76: 'GingerbreadGeologist',
-        83: 'SootyGeologist', 86: 'BalancedGeologist',
+        83: 'SootyGeologist', 86: 'BalancedGeologist', 98: 'TitanicGeologist',
     };
     var GENERAL_TYPES = {
         0: 'General', 3: 'General',
