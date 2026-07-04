@@ -174,8 +174,18 @@ final class SpecialistDispatchCoordinator {
     }
 
     // Send the current per-row task to one specialist. Mirrors the optimistic
-    // UI flip + AMF dispatch the panel did inline before.
-    func dispatchOne(spec: SpecialistItem, taskCode: TaskCode, targetGrid: Int) {
+    // UI flip + AMF dispatch the panel did inline before. Non-idle specs are
+    // silently skipped — the row button is disabled while busy, but bulk /
+    // sweep callers can still hit this with stale roster state, and there's
+    // no point sending an AMF call the server would reject. `fireReDispatch`
+    // explicitly opts out because its wake fires by design after our own
+    // optimistic markDispatched flipped the spec to busy.
+    func dispatchOne(spec: SpecialistItem, taskCode: TaskCode, targetGrid: Int,
+                     bypassIdleGuard: Bool = false) {
+        guard bypassIdleGuard || spec.isIdle else {
+            logger.log("[Dispatch] skipping uid=\(spec.id) — not idle")
+            return
+        }
         store.markDispatched(uid: spec.id,
                              actionType: taskCode.actionType,
                              subTaskId: taskCode.subTaskID)
@@ -249,7 +259,7 @@ final class SpecialistDispatchCoordinator {
         else { return }
         let next = strategy.taskCode(for: current)
         logger.log("[AutoLoop] timer wake — re-dispatching uid=\(uid) to \(strategy.taskLogLabel)")
-        dispatchOne(spec: current, taskCode: next, targetGrid: 0)
+        dispatchOne(spec: current, taskCode: next, targetGrid: 0, bypassIdleGuard: true)
     }
 
     private func cancelAllPendingReDispatches() {

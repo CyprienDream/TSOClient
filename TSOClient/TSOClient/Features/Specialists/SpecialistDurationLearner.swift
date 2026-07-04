@@ -94,7 +94,11 @@ final class SpecialistDurationLearner {
                                      formatter: SpecialistDisplayFormatter,
                                      pfbActive: Bool,
                                      now: Date) {
-        let bonus = estimator.timeBonus(subTypeId: item.subTypeId)
+        let taskCode: TaskCode? = {
+            guard let at = item.taskActionType, let st = item.taskSubTaskId else { return nil }
+            return TaskCode(actionType: at, subTaskID: st)
+        }()
+        let bonus = estimator.timeBonus(subTypeId: item.subTypeId, task: taskCode)
         if let ct = item.collectedTime {
             let realElapsedSec = Double(ct) / 1000.0 * 100.0 / Double(bonus)
             taskStartedAt[item.uid] = now.addingTimeInterval(-realElapsedSec)

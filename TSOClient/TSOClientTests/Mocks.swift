@@ -66,7 +66,7 @@ final class FakeDurationEstimator: DurationEstimator {
         estimateFn(task, subTypeId, skills)
     }
 
-    func timeBonus(subTypeId: Int) -> Int { 100 }
+    func timeBonus(subTypeId: Int, task: TaskCode?) -> Int { 100 }
 }
 
 // Records every command the coordinators try to dispatch. Conforms to all
