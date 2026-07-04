@@ -29,13 +29,14 @@ struct DispatchTradeCommand: LoggableCommand {
     let offerAmount: Int
     let costsResource: String        // e.g. "Wood"
     let costsAmount: Int
+    let lots: Int                    // trade-office bundle count; 0 for private trade
     let slotType: Int                // 4 = private trade, 0 = open-market
 
     var type: String { "DISPATCH_TRADE" }
     var logSummary: String {
         "DISPATCH_TRADE to=\(receipientId) " +
         "offer=\(offerAmount)x\(offerResource) costs=\(costsAmount)x\(costsResource) " +
-        "slot=\(slotType)"
+        "lots=\(lots) slot=\(slotType)"
     }
 }
 

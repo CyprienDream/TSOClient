@@ -22,6 +22,13 @@ final class TradeCoordinator {
     var costsResource: String = "Wood"
     var costsAmount: Int = 1
 
+    // Trade-office bundle count for public trades (dTradeOfferVO.lots).
+    // Ignored on private trades — those always send 0. The game caps this at
+    // 4 (matches the trade-office UI); the panel enforces the range via a
+    // 1...4 Stepper.
+    var lots: Int = 1
+    static let maxLots: Int = 4
+
     // Lightweight one-shot feedback for the panel: shown after a Trade
     // press, auto-cleared after `statusVisibleDuration` seconds so the
     // panel doesn't stay stuck on stale "Sent to …" copy after the next
@@ -49,6 +56,15 @@ final class TradeCoordinator {
         !costsResource.isEmpty && costsAmount > 0
     }
 
+    // Public trade skips the recipient check — the wire uses receipientId=0
+    // for trade-office listings (verified from a live dTradeObjectVO echo,
+    // senderID=self, receiverID=0).
+    var canSendPublic: Bool {
+        !offerResource.isEmpty && offerAmount > 0 &&
+        !costsResource.isEmpty && costsAmount > 0 &&
+        lots >= 1 && lots <= Self.maxLots
+    }
+
     func send() {
         guard canSend else {
             setStatus("Fill in all fields.")
@@ -73,6 +89,25 @@ final class TradeCoordinator {
         setStatus("Sent return pair to \(name).")
     }
 
+    // Places the offer in the trade office (receipientId=0, slotType=0).
+    // The lots field carries the panel's bundle count; the game caps it at 4.
+    func sendPublic() {
+        guard canSendPublic else {
+            setStatus("Fill in all fields.")
+            return
+        }
+        logger.log("[Trade] public offer — " +
+                   "\(offerAmount)×\(offerResource) for \(costsAmount)×\(costsResource) ×\(lots)")
+        dispatcher.dispatchTrade(
+            receipientId: 0,
+            offerResource: offerResource, offerAmount: offerAmount,
+            costsResource: costsResource, costsAmount: costsAmount,
+            lots: lots,
+            slotType: 0 // open-market / trade office
+        )
+        setStatus("Placed public offer (×\(lots)).")
+    }
+
     private func dispatchPair(name: String, returning: Bool) {
         logger.log("[Trade] send to \(name) — " +
                    "\(offerAmount)×\(offerResource) for \(costsAmount)×\(costsResource)")
@@ -80,7 +115,8 @@ final class TradeCoordinator {
             receipientId: selectedRecipientID,
             offerResource: offerResource, offerAmount: offerAmount,
             costsResource: costsResource, costsAmount: costsAmount,
-            slotType: 4 // private trade
+            lots: 0, // private trade — game observed lots=0
+            slotType: 4
         )
         guard returning else { return }
         logger.log("[Trade] return to \(name) — " +
@@ -89,6 +125,7 @@ final class TradeCoordinator {
             receipientId: selectedRecipientID,
             offerResource: costsResource, offerAmount: costsAmount,
             costsResource: offerResource, costsAmount: offerAmount,
+            lots: 0,
             slotType: 4
         )
     }
