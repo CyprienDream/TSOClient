@@ -43,6 +43,7 @@
     "Improved Bakery":             "Aunt Irma's Feast",
     "Mill":                        "Aunt Irma's Feast",
     "Improved Mill":               "Aunt Irma's Feast",
+    "Friary":                      "Aunt Irma's Feast",
 
     "Fisherman":                   "Aunt Irma's Feast",
     "Fish Farm":                   "Aunt Irma's Feast",
@@ -56,6 +57,7 @@
 
     "Recycling Manufactory":       "Aunt Irma's Feast",
     "Coking Plant":                "Aunt Irma's Feast",
+    "Krampus Pit":                 "Aunt Irma's Feast",
 
     "Provision House":             "",
     "Provision House 2":           "",
@@ -109,6 +111,7 @@
       "Bungalow",
       "ChristmasBakery",
       "ElderTreeLH",
+      "EventMonster_WeeklyChallengeShip",
       "ExoticWoodTreeSchool",
       "ExpeditionWeaponSmith",
       "Farmfield",
@@ -122,8 +125,12 @@
       "IceSkatingLake",
       "Mayorhouse",
       "Oilmill",
+      "Ostereierbaum_blue",
+      "Prospector",
       "RangerHut",
+      "SiegeWorkshop",
       "StarfallAirship",
+      "StarfallStarExtractor2",
       "Tavern",
       "VillageSchool",
       "WhiteCastle",
