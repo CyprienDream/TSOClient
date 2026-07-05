@@ -42,6 +42,7 @@
   { "displayName": "Improved Bakery",                   "skinBases": ["ImprovedBakery"],                         "group": "Food" },
   { "displayName": "Mill",                              "skinBases": ["Miller"],                                 "group": "Food" },
   { "displayName": "Improved Mill",                     "skinBases": ["ImprovedMill"],                           "group": "Food" },
+  { "displayName": "Friary",                            "skinBases": ["Friary"],                                 "group": "Food" },
 
   { "displayName": "Fisherman",                         "skinBases": ["Fisher"],                                 "group": "Primary Resource" },
   { "displayName": "Fish Farm",                         "skinBases": ["FishFarm"],                               "group": "Primary Resource" },
@@ -55,6 +56,7 @@
 
   { "displayName": "Recycling Manufactory",             "skinBases": ["coal_workyard", "RecyclingManufactory"],  "group": "Coal" },
   { "displayName": "Coking Plant",                      "skinBases": ["CokingPlant"],                            "group": "Coal" },
+  { "displayName": "Krampus Pit",                       "skinBases": ["KrampusPit"],                             "group": "Coal" },
 
   { "displayName": "Provision House",                   "skinBases": ["ProvisionHouse"],                         "group": "Provision House" },
   { "displayName": "Provision House 2",                 "skinBases": ["ProvisionHouse2"],                        "group": "Provision House" },
@@ -70,15 +72,17 @@
   { "displayName": "Platinum Weaponsmith",              "skinBases": ["PlatinumWeaponsmith"],                    "group": "Weapons" },
   { "displayName": "Archebuse Maker",                   "skinBases": ["ArchebuseMaker"],                         "group": "Weapons" },
   { "displayName": "Cannon Forge",                      "skinBases": ["CannonForge"],                            "group": "Weapons" },
-  { "displayName": "Carpenter",                         "skinBases": ["Carpenter"],                              "group": "Weapons" },
   { "displayName": "Crossbowsmith",                     "skinBases": ["Crossbowsmith"],                          "group": "Weapons" },
   { "displayName": "Foundry",                           "skinBases": ["Foundry"],                                "group": "Weapons" },
   { "displayName": "Longbow Maker",                     "skinBases": ["Longbowmaker"],                           "group": "Weapons" },
   { "displayName": "Bowmaker",                          "skinBases": ["Bowmaker"],                               "group": "Weapons" },
-  { "displayName": "Saddle Maker",                      "skinBases": ["SaddleMaker"],                            "group": "Weapons" },
-  { "displayName": "Wagon Maker",                       "skinBases": ["WagonMaker"],                             "group": "Weapons" },
-  { "displayName": "Wheel Maker",                       "skinBases": ["Wheelmaker"],                             "group": "Weapons" },
-  { "displayName": "Weaver",                            "skinBases": ["Weaver"],                                 "group": "Weapons" },
+
+  { "displayName": "Carpenter",                         "skinBases": ["Carpenter"],                              "group": "Weapon Tools" },
+  { "displayName": "Saddle Maker",                      "skinBases": ["SaddleMaker"],                            "group": "Weapon Tools" },
+  { "displayName": "Wagon Maker",                       "skinBases": ["WagonMaker"],                             "group": "Weapon Tools" },
+  { "displayName": "Weaver",                            "skinBases": ["Weaver"],                                 "group": "Weapon Tools" },
+  { "displayName": "Wheel Maker",                       "skinBases": ["Wheelmaker"],                             "group": "Weapon Tools" },
+  { "displayName": "Homestead",                         "skinBases": ["Homestead", "Shepard"],                   "group": "Weapon Tools" },
 
   { "displayName": "Papermill Simple",                  "skinBases": ["PapermillSimple"],                        "group": "Science" },
   { "displayName": "Papermill Intermediate",            "skinBases": ["PapermillIntermediate"],                  "group": "Science" },
@@ -96,7 +100,6 @@
   { "displayName": "PowderHut",                         "skinBases": ["Powderhut"] },
   { "displayName": "Toolmaker",                         "skinBases": ["Toolmaker"] },
 
-  { "displayName": "Homestead",                         "skinBases": ["Homestead"] },
   { "displayName": "Rabbit Retreat",                    "skinBases": ["RabbitBreeding"] },
   { "displayName": "Mountain Clan Colossus",            "skinBases": ["MountainClanColossus"] }
 ]

@@ -36,6 +36,7 @@ enum BuildingGroup: String, CaseIterable {
     case provisionHouse  = "Provision House"
     case barracks        = "Barracks"
     case weapons         = "Weapons"
+    case weaponTools     = "Weapon Tools"
     case science         = "Science"
     case bookbinder      = "Bookbinder"
     case tributes        = "Tributes"
@@ -45,7 +46,7 @@ enum BuildingGroup: String, CaseIterable {
     static let allOrdered: [BuildingGroup] = [
         .mines, .masons, .smelters, .wood, .food,
         .primaryResource, .coin, .coal,
-        .provisionHouse, .barracks, .weapons, .science, .bookbinder,
+        .provisionHouse, .barracks, .weapons, .weaponTools, .science, .bookbinder,
         .tributes, .other, .unmapped
     ]
 
@@ -64,6 +65,7 @@ enum BuildingGroup: String, CaseIterable {
         case .provisionHouse:  return Color(red: 0.65, green: 0.50, blue: 0.30) // tan
         case .barracks:        return Color(red: 0.55, green: 0.20, blue: 0.20) // muted red
         case .weapons:         return Color(red: 0.75, green: 0.30, blue: 0.30) // brick red
+        case .weaponTools:     return Color(red: 0.65, green: 0.45, blue: 0.20) // toolshed brown
         case .science:         return Color(red: 0.35, green: 0.50, blue: 0.70) // ink blue
         case .bookbinder:      return Color(red: 0.55, green: 0.35, blue: 0.55) // parchment violet
         case .tributes:        return Color(red: 0.40, green: 0.55, blue: 0.75) // soft blue
