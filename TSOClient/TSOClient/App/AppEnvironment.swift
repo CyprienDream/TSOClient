@@ -67,6 +67,7 @@ struct AppEnvironment {
             buildingsStore: buildings,
             dispatcher: sender,
             classifier: buffCategoryClassifier,
+            bulk: BulkDispatcher(interCallDelayNs: 200_000_000),
             logger: logger)
     }
 }
