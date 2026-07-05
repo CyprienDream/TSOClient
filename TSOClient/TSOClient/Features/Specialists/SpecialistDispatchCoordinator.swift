@@ -120,7 +120,7 @@ final class SpecialistDispatchCoordinator {
             self.autoExplorerLoopTask = task
         }
         for sub in GeologistAutoLoopSubtype.supported {
-            var state = GeologistLoopState()
+            var state = GeologistLoopState(task: sub.defaultTask)
             state.enabled = defaults.bool(forKey: Keys.geologistLoopEnabled(subTypeId: sub.subTypeId))
             if let raw = defaults.object(forKey: Keys.geologistLoopTask(subTypeId: sub.subTypeId)) as? Int,
                let task = GeologistTask(rawValue: raw) {

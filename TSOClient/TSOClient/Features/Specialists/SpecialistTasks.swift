@@ -120,11 +120,13 @@ let generalStarMenuCode = TaskCode(actionType: 12, subTaskID: 0)
 struct GeologistAutoLoopSubtype: Hashable, Identifiable {
     let subTypeId: Int
     let label: String
+    let defaultTask: GeologistTask
     var id: Int { subTypeId }
 
     static let supported: [GeologistAutoLoopSubtype] = [
-        .init(subTypeId: 35, label: "Stone Cold"),
-        .init(subTypeId: 59, label: "Diligent"),
+        .init(subTypeId: 35, label: "Stone Cold", defaultTask: .findStone),
+        .init(subTypeId: 59, label: "Diligent",   defaultTask: .findStone),
+        .init(subTypeId: 98, label: "Titanic",    defaultTask: .findTitanium),
     ]
 
     static func label(forSubTypeId id: Int) -> String {
