@@ -40,6 +40,7 @@ struct ContentView: View {
                     TradePanel(
                         recipientsStore: env.recipients,
                         resourcesStore: env.resources,
+                        publicTradesStore: env.publicTrades,
                         coordinator: env.tradeCoordinator
                     )
                 }

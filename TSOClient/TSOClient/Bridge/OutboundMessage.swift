@@ -40,6 +40,13 @@ struct DispatchTradeCommand: LoggableCommand {
     }
 }
 
+struct CancelTradeCommand: LoggableCommand {
+    let tradeId: Int                 // dTradeObjectVO.id from the 1062 snapshot
+
+    var type: String { "CANCEL_TRADE" }
+    var logSummary: String { "CANCEL_TRADE id=\(tradeId)" }
+}
+
 struct DispatchBuffCommand: LoggableCommand {
     let buffUid1: Int
     let buffUid2: Int

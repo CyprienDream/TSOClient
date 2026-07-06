@@ -54,6 +54,22 @@ enum InboundMessage {
         }
     }
 
+    // Own active public trades from a type=1062 snapshot. Panels render one
+    // row per item plus a delete button that fires opcode 1056 keyed by `id`.
+    struct PublicTradesPayload: Decodable {
+        let items: [Item]
+
+        struct Item: Decodable {
+            let id: Int             // dTradeObjectVO.id — cancel opcode carries this
+            let slotType: Int
+            let slotPos: Int
+            let type: Int           // 0/1/2/3 — trade kind (offer/buy/etc.); display-only
+            let offer: String       // "<offerRes>|<costRes>|<lots>" pipe-encoded
+            let remainingTime: Int  // ms until expiration
+            let lotsRemaining: Int
+        }
+    }
+
     // Wire-confirmed resource names accumulated by the JS scanner. The
     // scanner only emits when the set grew, so a refresh on this message
     // is always a delta in the "got bigger" direction.

@@ -8,7 +8,8 @@ protocol ZoneLifecycle: AnyObject {
     func clear()
 }
 
-extension CollectiblesStore: ZoneLifecycle {}
-extension SpecialistsStore:  ZoneLifecycle {}
-extension BuildingsStore:    ZoneLifecycle {}
-extension BuffsStore:        ZoneLifecycle {}
+extension CollectiblesStore:  ZoneLifecycle {}
+extension SpecialistsStore:   ZoneLifecycle {}
+extension BuildingsStore:     ZoneLifecycle {}
+extension BuffsStore:         ZoneLifecycle {}
+extension PublicTradesStore:  ZoneLifecycle {}

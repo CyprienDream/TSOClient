@@ -192,6 +192,76 @@ describe('outbound RPC wire format', () => {
         expect(trade.costsRes.amount).toBe(50);
     });
 
+    it('dispatchTrade (public): auto-picks lowest unused slotPos from _tsoOwnPublicTradeSlots', async () => {
+        // Simulate a 1062 snapshot: two of our own public trades already
+        // occupy slotType=2 at positions 0 and 1. The third dispatch must
+        // land at slotPos=2, not 0. Same-slot re-use is what caused the
+        // "only first trade posts" bug — server silently drops duplicates.
+        sandbox.window._tsoOwnPublicTradeSlots = { 2: { 0: true, 1: true } };
+        await sandbox.window._TSORPC.dispatchTrade({
+            receipientId:   0,
+            offerResource: 'Wood',
+            offerAmount:    1,
+            costsResource: 'EMEventResource',
+            costsAmount:    5,
+            lots:           1,
+            slotType:       2,
+            // no slotPos → encoder must pick 2.
+        });
+        const { rmsg } = parseCapturedCall();
+        const trade = rmsg.body[0].data;
+        expect(trade.slotType).toBe(2);
+        expect(trade.slotPos).toBe(2);
+        // Optimistic claim: 2 is now recorded so the next dispatch picks 3.
+        expect(sandbox.window._tsoOwnPublicTradeSlots[2][2]).toBe(true);
+    });
+
+    it('dispatchTrade (public): auto-picks 0 when the slot map is empty', async () => {
+        // Fresh session, no 1062 seen yet — auto-pick must fall back to 0
+        // (the free first slot) rather than crash on a missing map.
+        await sandbox.window._TSORPC.dispatchTrade({
+            receipientId:   0,
+            offerResource: 'Wood',
+            offerAmount:    1,
+            costsResource: 'EMEventResource',
+            costsAmount:    5,
+            lots:           1,
+            slotType:       0,
+        });
+        const trade = parseCapturedCall().rmsg.body[0].data;
+        expect(trade.slotPos).toBe(0);
+    });
+
+    it('dispatchTrade (private, slotType=4): does not auto-pick and does not touch slot map', async () => {
+        sandbox.window._tsoOwnPublicTradeSlots = { 2: { 0: true } };
+        await sandbox.window._TSORPC.dispatchTrade({
+            receipientId:   1928723,
+            offerResource: 'Plank',
+            offerAmount:    1500,
+            costsResource: 'Wood',
+            costsAmount:    1,
+            slotType:       4, // default anyway; asserted below
+        });
+        const trade = parseCapturedCall().rmsg.body[0].data;
+        expect(trade.slotType).toBe(4);
+        expect(trade.slotPos).toBe(0);
+        // Private trade must NOT claim a public slot.
+        expect(sandbox.window._tsoOwnPublicTradeSlots).toEqual({ 2: { 0: true } });
+    });
+
+    it('dispatchCancelTrade: dServerCall.type=1056, data is a bare dIntegerVO carrying the trade id', async () => {
+        await sandbox.window._TSORPC.dispatchCancelTrade({ tradeId: 42761633 });
+        const { rmsg } = parseCapturedCall();
+        const call    = rmsg.body[0];
+        const payload = call.data;
+
+        expect(call.type).toBe(1056);
+        expect(payload.__class).toBe('defaultGame.Communication.VO.dIntegerVO');
+        // Trait member order pinned — this is load-bearing on the wire.
+        expect(Object.keys(payload)).toEqual(['__class', 'value']);
+        expect(payload.value).toBe(42761633);
+    });
+
     it('dispatchSpecialist rejects with auth error when _tsoAuthCtx is missing', async () => {
         sandbox.window._tsoAuthCtx = null;
         await expect(
