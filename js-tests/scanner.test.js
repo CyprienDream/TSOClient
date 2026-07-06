@@ -140,6 +140,79 @@ describe('amf3-scanner home-zone gate', () => {
         expect(s.specialistsCount()).toBe(2);
     });
 
+    it('type=1062 emits PUBLIC_TRADES with per-item id/slotType/slotPos/offer', () => {
+        const s = buildScannerSandbox();
+        const trade = (id, slotType, slotPos, offer, remainingTime, lotsRemaining) => ({
+            __class: FQN('TradeWindow.dTradeObjectVO'),
+            id, slotType, slotPos, type: 0, offer, remainingTime, lotsRemaining,
+        });
+        const resp = {
+            body: {
+                __class: FQN('dServerResponse'),
+                type: 1062,
+                data: {
+                    __class: FQN('dServerActionResult'),
+                    errorCode: 0,
+                    data: {
+                        __class: FQN('dGameTickCommandVO'),
+                        mode: 1062,
+                        data: {
+                            __class: 'flex.messaging.io.ArrayCollection',
+                            source: [
+                                trade(42761633, 2, 0, 'Wood,1|EMEventResource,5|1', 3_600_000, 1),
+                                trade(42760477, 0, 0, 'EMEventResource,650|BuildBuilding,Friary,1|1', 5_997_000, 1),
+                            ],
+                        },
+                    },
+                },
+            },
+        };
+        s.analyze([{ value: [resp] }]);
+        const emit = s.sends.find((e) => e.type === 'PUBLIC_TRADES');
+        expect(emit, 'PUBLIC_TRADES not emitted').toBeTruthy();
+        expect(emit.payload.items).toEqual([
+            { id: 42761633, slotType: 2, slotPos: 0, type: 0,
+              offer: 'Wood,1|EMEventResource,5|1', remainingTime: 3_600_000, lotsRemaining: 1 },
+            { id: 42760477, slotType: 0, slotPos: 0, type: 0,
+              offer: 'EMEventResource,650|BuildBuilding,Friary,1|1', remainingTime: 5_997_000, lotsRemaining: 1 },
+        ]);
+    });
+
+    it('type=1062 populates _tsoOwnPublicTradeSlots with occupied {slotType: {slotPos}} map', () => {
+        // Encoder auto-picks the next unused slotPos from this global. The
+        // 1062 handler ingests the own-trade-window snapshot; without this
+        // map, every dispatch would target slot 0 and duplicate trades get
+        // silently dropped by the server despite an errorCode=0 ack.
+        const s = buildScannerSandbox();
+        const trade = (slotType, slotPos) => ({
+            __class: FQN('TradeWindow.dTradeObjectVO'),
+            slotType, slotPos,
+        });
+        const resp = {
+            body: {
+                __class: FQN('dServerResponse'),
+                type: 1062,
+                data: {
+                    __class: FQN('dServerActionResult'),
+                    errorCode: 0,
+                    data: {
+                        __class: FQN('dGameTickCommandVO'),
+                        mode: 1062,
+                        data: {
+                            __class: 'flex.messaging.io.ArrayCollection',
+                            source: [trade(0, 0), trade(2, 0), trade(2, 1), trade(2, 2)],
+                        },
+                    },
+                },
+            },
+        };
+        s.analyze([{ value: [resp] }]);
+        expect(s.sandbox.window._tsoOwnPublicTradeSlots).toEqual({
+            0: { 0: true },
+            2: { 0: true, 1: true, 2: true },
+        });
+    });
+
     it('does not gate on auth-ctx zoneID — friend response is blocked even when _tsoAuthCtx still reads home', () => {
         // Precise regression: the game's "visit friend" outbound carries the
         // home zoneID, so _tsoAuthCtx.zoneID still reads home when the

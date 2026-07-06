@@ -6,10 +6,12 @@ import Foundation
 struct TradeCoordinatorTests {
 
     private func makeCoord(recipients: RecipientsStore = RecipientsStore(),
+                           publicTrades: PublicTradesStore = PublicTradesStore(),
                            dispatcher: CapturingDispatcher = CapturingDispatcher())
         -> (TradeCoordinator, CapturingDispatcher) {
         let coord = TradeCoordinator(
             recipients: recipients,
+            publicTrades: publicTrades,
             dispatcher: dispatcher,
             logger: MockLogger())
         return (coord, dispatcher)
@@ -63,7 +65,10 @@ struct TradeCoordinatorTests {
         #expect(cmd?.costsResource == "Wood")
         #expect(cmd?.costsAmount == 1)
         #expect(cmd?.lots == 2)
-        #expect(cmd?.slotType == 0)
+        // slotType=2 = "asking for a resource" category. Confirmed on wire
+        // 2026-07-06 — the server rejects a resource-for-resource shape sent
+        // as slotType=0 (that category expects a costsBuff, not costsRes).
+        #expect(cmd?.slotType == 2)
     }
 
     @Test func sendReturnKeepsLotsZeroOnBothLegs() {
@@ -135,6 +140,74 @@ struct TradeCoordinatorTests {
         coord.selectedRecipientID = 4242
         coord.send()
         #expect(coord.lastSendStatus == "Sent to (id 4242).")
+    }
+
+    @Test func cancelDispatchesAndOptimisticallyRemovesFromStore() {
+        let publicTrades = PublicTradesStore()
+        publicTrades.apply(.init(items: [
+            .init(id: 42761633, slotType: 2, slotPos: 0, type: 0,
+                  offer: "Wood,1|EMEventResource,5|1",
+                  remainingTime: 3_600_000, lotsRemaining: 1)
+        ]))
+        let (coord, dispatcher) = makeCoord(publicTrades: publicTrades)
+
+        coord.cancel(tradeId: 42761633)
+
+        #expect(dispatcher.sent.count == 1)
+        let cmd = dispatcher.sent[0] as? CancelTradeCommand
+        #expect(cmd?.tradeId == 42761633)
+        // Optimistic removal — the row disappears immediately; the next
+        // 1062 snapshot reconfirms or restores it.
+        #expect(publicTrades.items.isEmpty)
+    }
+}
+
+@Suite("PublicTradesStore")
+struct PublicTradesStoreTests {
+
+    @Test func applyReplacesItemsAndSortsBySlot() {
+        let store = PublicTradesStore()
+        store.apply(.init(items: [
+            .init(id: 3, slotType: 2, slotPos: 1, type: 0,
+                  offer: "A|B|1", remainingTime: 0, lotsRemaining: 1),
+            .init(id: 1, slotType: 0, slotPos: 0, type: 0,
+                  offer: "C|D|1", remainingTime: 0, lotsRemaining: 1),
+            .init(id: 2, slotType: 2, slotPos: 0, type: 0,
+                  offer: "E|F|1", remainingTime: 0, lotsRemaining: 1),
+        ]))
+        #expect(store.items.map(\.tradeId) == [1, 2, 3])
+    }
+
+    @Test func applyDedupesByFingerprintSkipsVersionBump() {
+        let store = PublicTradesStore()
+        let payload = InboundMessage.PublicTradesPayload(items: [
+            .init(id: 1, slotType: 0, slotPos: 0, type: 0,
+                  offer: "X|Y|1", remainingTime: 100, lotsRemaining: 1)
+        ])
+        store.apply(payload)
+        let v1 = store.version
+        store.apply(payload)
+        #expect(store.version == v1)
+    }
+
+    @Test func removeOptimisticallyDropsRow() {
+        let store = PublicTradesStore()
+        store.apply(.init(items: [
+            .init(id: 42, slotType: 0, slotPos: 0, type: 0,
+                  offer: "A|B|1", remainingTime: 0, lotsRemaining: 1)
+        ]))
+        store.remove(tradeId: 42)
+        #expect(store.items.isEmpty)
+    }
+
+    @Test func clearWipesForZoneLifecycle() {
+        let store = PublicTradesStore()
+        store.apply(.init(items: [
+            .init(id: 1, slotType: 0, slotPos: 0, type: 0,
+                  offer: "A|B|1", remainingTime: 0, lotsRemaining: 1)
+        ]))
+        store.clear()
+        #expect(store.items.isEmpty)
     }
 }
 

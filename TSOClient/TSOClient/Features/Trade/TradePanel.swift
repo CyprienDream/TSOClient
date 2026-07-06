@@ -3,6 +3,7 @@ import SwiftUI
 struct TradePanel: View {
     var recipientsStore: RecipientsStore
     var resourcesStore: ResourcesStore
+    var publicTradesStore: PublicTradesStore
     var coordinator: TradeCoordinator
 
     var body: some View {
@@ -10,12 +11,17 @@ struct TradePanel: View {
         return VStack(alignment: .leading, spacing: 0) {
             header
             Divider()
-            if recipients.isEmpty {
-                placeholder
-            } else {
-                form(recipients: recipients)
+            ScrollView {
+                VStack(alignment: .leading, spacing: 0) {
+                    if recipients.isEmpty {
+                        placeholder
+                    } else {
+                        form(recipients: recipients)
+                    }
+                    Divider()
+                    activeTradesSection
+                }
             }
-            Spacer()
         }
         .frame(width: 320)
     }
@@ -143,6 +149,75 @@ struct TradePanel: View {
                     .foregroundStyle(.secondary)
             }
         }
+    }
+
+    private var activeTradesSection: some View {
+        let items = publicTradesStore.items
+        return VStack(alignment: .leading, spacing: 6) {
+            HStack {
+                Text("My public trades")
+                    .font(.subheadline).bold()
+                Spacer()
+                Text("\(items.count)")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+            if items.isEmpty {
+                Text("None active. Waiting for the game to send a trade-window snapshot.")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+            } else {
+                ForEach(items) { trade in
+                    tradeRow(trade)
+                }
+            }
+        }
+        .padding(12)
+    }
+
+    private func tradeRow(_ trade: PublicTradesStore.PublicTrade) -> some View {
+        VStack(alignment: .leading, spacing: 2) {
+            HStack {
+                Text(offerLabel(trade.offer))
+                    .font(.caption)
+                    .lineLimit(2)
+                    .truncationMode(.tail)
+                Spacer()
+                Button(role: .destructive, action: { coordinator.cancel(tradeId: trade.tradeId) }) {
+                    Image(systemName: "trash")
+                }
+                .buttonStyle(.borderless)
+                .help("Cancel this trade (opcode 1056)")
+            }
+            HStack(spacing: 6) {
+                Text("slot \(trade.slotType)/\(trade.slotPos)")
+                if trade.lotsRemaining > 0 {
+                    Text("×\(trade.lotsRemaining)")
+                }
+                if trade.remainingTime > 0 {
+                    Text(remainingLabel(trade.remainingTime))
+                }
+                Spacer()
+                Text("#\(trade.tradeId)").monospacedDigit()
+            }
+            .font(.caption2)
+            .foregroundStyle(.secondary)
+        }
+        .padding(.vertical, 4)
+    }
+
+    // Offer string is "<offerRes>|<costRes>|<lots>"; each side is
+    // "<name>,<amount>" or "<verb>,<subject>,<amount>". Show it verbatim
+    // for now — the panel is a debug/util view, we care about legibility
+    // not localization.
+    private func offerLabel(_ offer: String) -> String {
+        let parts = offer.split(separator: "|", omittingEmptySubsequences: false)
+        guard parts.count >= 2 else { return offer }
+        return "\(parts[0]) → \(parts[1])"
+    }
+
+    private func remainingLabel(_ ms: Int) -> String {
+        DurationFormatter.format(Double(ms) / 1_000)
     }
 
     // Ignored on Trade / Return Trade (those send lots=0). Stepper enforces

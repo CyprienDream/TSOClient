@@ -703,6 +703,59 @@
                                 }
                             }
                         }
+
+                        // Own public trade slot tracker. sr.type=1062 is a
+                        // snapshot of the player's own trade window
+                        // (dGameTickCommandVO mode=1062 wrapping an
+                        // ArrayCollection of dTradeObjectVO). The server
+                        // requires an unused slotPos per slotType — a second
+                        // trade at the same (slotType, slotPos) is silently
+                        // dropped despite an errorCode=0 ack. We record
+                        // occupied slots here so the encoder can pick the
+                        // lowest-unused slotPos on the next dispatch.
+                        if (sr.type === 1062) {
+                            var tick = sr.data && sr.data.data;
+                            var tradeArr = tick && tick.data;
+                            var tradeList = unwrapCollection(tradeArr);
+                            var next = {};
+                            for (var ti = 0; ti < tradeList.length; ti++) {
+                                var tv = tradeList[ti];
+                                if (!tv || !tv.__class) continue;
+                                if (tv.__class.indexOf('dTradeObjectVO') < 0) continue;
+                                if (typeof tv.slotType !== 'number' ||
+                                    typeof tv.slotPos  !== 'number') continue;
+                                var stKey = tv.slotType | 0;
+                                if (!next[stKey]) next[stKey] = {};
+                                next[stKey][tv.slotPos | 0] = true;
+                            }
+                            window._tsoOwnPublicTradeSlots = next;
+                            var summary = Object.keys(next).map(function(k) {
+                                return k + ':[' + Object.keys(next[k]).sort().join(',') + ']';
+                            }).join(' ');
+                            webkit.messageHandlers.logger.postMessage(
+                                '[TradeSlots:emit] count=' + tradeList.length +
+                                ' slots=' + (summary || '(empty)'));
+
+                            // Emit PUBLIC_TRADES so the Swift-side panel can
+                            // render our own active trades and offer a cancel
+                            // button per row (opcode 1056 keyed by `id`).
+                            var items = [];
+                            for (var ii = 0; ii < tradeList.length; ii++) {
+                                var it = tradeList[ii];
+                                if (!it || !it.__class) continue;
+                                if (it.__class.indexOf('dTradeObjectVO') < 0) continue;
+                                items.push({
+                                    id:             (typeof it.id === 'number')             ? it.id             : 0,
+                                    slotType:       (typeof it.slotType === 'number')       ? it.slotType       : 0,
+                                    slotPos:        (typeof it.slotPos === 'number')        ? it.slotPos        : 0,
+                                    type:           (typeof it.type === 'number')           ? it.type           : 0,
+                                    offer:          (typeof it.offer === 'string')          ? it.offer          : '',
+                                    remainingTime:  (typeof it.remainingTime === 'number')  ? it.remainingTime  : 0,
+                                    lotsRemaining:  (typeof it.lotsRemaining === 'number')  ? it.lotsRemaining  : 0,
+                                });
+                            }
+                            window._tsoSend('PUBLIC_TRADES', { items: items });
+                        }
                     });
                 })(bodies[i].value);
             }

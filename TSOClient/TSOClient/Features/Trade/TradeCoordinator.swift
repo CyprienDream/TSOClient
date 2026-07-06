@@ -39,13 +39,16 @@ final class TradeCoordinator {
     private var statusClearTask: Task<Void, Never>?
 
     private let recipients: RecipientsStore
+    private let publicTrades: PublicTradesStore
     private let dispatcher: TradeDispatchPort
     private let logger: Logger
 
     init(recipients: RecipientsStore,
+         publicTrades: PublicTradesStore,
          dispatcher: TradeDispatchPort,
          logger: Logger = ConsoleLogger()) {
         self.recipients = recipients
+        self.publicTrades = publicTrades
         self.dispatcher = dispatcher
         self.logger = logger
     }
@@ -89,8 +92,16 @@ final class TradeCoordinator {
         setStatus("Sent return pair to \(name).")
     }
 
-    // Places the offer in the trade office (receipientId=0, slotType=0).
-    // The lots field carries the panel's bundle count; the game caps it at 4.
+    // Places the offer in the trade office (receipientId=0). `slotType`
+    // is determined by the shape of the ask, verified from the game's own
+    // outbound 2026-07-06:
+    //   • costsRes populated (resource ask)      → slotType=2
+    //   • costsBuff populated (building/buff ask) → slotType=0
+    // The panel currently only builds resource-for-resource trades, so we
+    // always send 2. slotPos is auto-picked by the encoder from
+    // _tsoOwnPublicTradeSlots. The server auto-deducts the coin fee for
+    // slotPos > 0 based on the player's total active-trade count — no
+    // coin field on the wire.
     func sendPublic() {
         guard canSendPublic else {
             setStatus("Fill in all fields.")
@@ -103,9 +114,19 @@ final class TradeCoordinator {
             offerResource: offerResource, offerAmount: offerAmount,
             costsResource: costsResource, costsAmount: costsAmount,
             lots: lots,
-            slotType: 0 // open-market / trade office
+            slotType: 2 // resource-for-resource ask category
         )
         setStatus("Placed public offer (×\(lots)).")
+    }
+
+    // Cancel one of our own public trades. The store optimistically drops
+    // the row so the panel updates instantly; the next 1062 snapshot
+    // reconfirms or restores the row if the server refused.
+    func cancel(tradeId: Int) {
+        logger.log("[Trade] cancel id=\(tradeId)")
+        publicTrades.remove(tradeId: tradeId)
+        dispatcher.cancelTrade(tradeId: tradeId)
+        setStatus("Cancelled trade #\(tradeId).")
     }
 
     private func dispatchPair(name: String, returning: Bool) {

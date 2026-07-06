@@ -212,6 +212,11 @@
     var dTradeOfferVO = trait('defaultGame.Communication.VO.dTradeOfferVO',
         ['receipientId', 'offerRes', 'offerBuff',
          'costsRes', 'costsBuff', 'lots', 'slotType', 'slotPos']);
+    // dIntegerVO wraps a single numeric argument. opcode=1056 (cancel trade)
+    // uses it to carry the target `dTradeObjectVO.id`. Verified 2026-07-05
+    // from a live capture with _tsoDiag on.
+    var dIntegerVO = trait('defaultGame.Communication.VO.dIntegerVO',
+        ['value']);
 
     // ── _TSORPC namespace ─────────────────────────────────────────────────
 
@@ -361,9 +366,26 @@
         });
     }
 
-    // opcode=1049 — send a private trade offer. Unlike opcodes 95/61,
-    // dServerCall.data is a dTradeOfferVO directly (no dServerAction wrapper).
-    // Verified 2026-06-27 from a live capture (slotType=4 = private trade).
+    // Find the lowest slotPos not present in the occupied set for the given
+    // slotType. Public trades require an unused slotPos — the server silently
+    // drops a duplicate (Corn/Bronze attempts on 2026-07-05 acked errorCode=0
+    // but never appeared in the next dTradeWindow snapshot). The first slot
+    // is free; each subsequent slot costs 3 more coins server-side (2nd=3,
+    // 3rd=6, 4th=9…) with no coin field on the wire.
+    function nextPublicSlotPos(slotType) {
+        var map = window._tsoOwnPublicTradeSlots || {};
+        var occ = map[slotType] || {};
+        for (var i = 0; i < 32; i++) {
+            if (!occ[i]) return i;
+        }
+        return 0;
+    }
+
+    // opcode=1049 — send a trade offer. Unlike opcodes 95/61, dServerCall.data
+    // is a dTradeOfferVO directly (no dServerAction wrapper). slotType=4 is a
+    // private trade (verified 2026-06-27); slotType 0/2 are public offer/ask.
+    // For public trades, slotPos auto-picks the lowest unused index unless
+    // the caller passes one explicitly.
     function dispatchTrade(opts) {
         var ctx = requireAuthCtx('[_TSORPC:trade]');
         if (!ctx) return Promise.reject(new Error('auth not ready'));
@@ -375,7 +397,14 @@
         var costsAmount     = opts.costsAmount | 0;
         var lots            = (opts.lots !== undefined ? opts.lots : 0) | 0;
         var slotType        = (opts.slotType !== undefined ? opts.slotType : 4) | 0;
-        var slotPos         = opts.slotPos | 0;
+        var slotPos;
+        if (opts.slotPos !== undefined && opts.slotPos !== null) {
+            slotPos = opts.slotPos | 0;
+        } else if (slotType === 4) {
+            slotPos = 0;
+        } else {
+            slotPos = nextPublicSlotPos(slotType);
+        }
 
         var offerRes = dResourceVO([offerName, offerAmount, 0]);
         var costsRes = dResourceVO([costsName, costsAmount, 0]);
@@ -393,14 +422,50 @@
             '[_TSORPC:trade] to=' + receipientId +
             ' offer=' + offerAmount + 'x' + offerName +
             ' costs=' + costsAmount + 'x' + costsName +
-            ' slotType=' + slotType +
+            ' slotType=' + slotType + ' slotPos=' + slotPos +
             ' zone=' + ctx.zoneID);
 
         return sendAMF([msg]).then(function(result) {
+            // Optimistically claim the slot so a rapid follow-up dispatch
+            // targets the next free slot before the server's next 1062
+            // snapshot arrives. Skips private trades (slotType=4) — those
+            // don't consume a public slot.
+            if (slotType !== 4) {
+                if (!window._tsoOwnPublicTradeSlots) window._tsoOwnPublicTradeSlots = {};
+                var map = window._tsoOwnPublicTradeSlots;
+                if (!map[slotType]) map[slotType] = {};
+                map[slotType][slotPos] = true;
+            }
             webkit.messageHandlers.logger.postMessage(
                 '[_TSORPC:trade] ack: ' + JSON.stringify(result));
         }).catch(function(e) {
             webkit.messageHandlers.logger.postMessage('[_TSORPC:trade] error: ' + e);
+        });
+    }
+
+    // opcode=1056 — cancel a public trade. dServerCall.data is a bare
+    // dIntegerVO whose value carries the dTradeObjectVO.id. Response mode is
+    // 1060 (dTradeCompleteUpdateVO) and includes returnedItem (the offered
+    // resource refunded) with tradeDeleted=true.
+    function dispatchCancelTrade(opts) {
+        var ctx = requireAuthCtx('[_TSORPC:cancelTrade]');
+        if (!ctx) return Promise.reject(new Error('auth not ready'));
+
+        var tradeId = opts.tradeId | 0;
+        var payload = dIntegerVO([tradeId]);
+        var call = dServerCall([1056, ctx.zoneID, payload,
+                                ctx.dsoAuthUser, ctx.dsoAuthToken, ctx.dsoAuthRandomClientID]);
+        var msg  = buildRemotingMessage(ctx, call);
+
+        webkit.messageHandlers.logger.postMessage(
+            '[_TSORPC:cancelTrade] tradeId=' + tradeId +
+            ' zone=' + ctx.zoneID);
+
+        return sendAMF([msg]).then(function(result) {
+            webkit.messageHandlers.logger.postMessage(
+                '[_TSORPC:cancelTrade] ack: ' + JSON.stringify(result));
+        }).catch(function(e) {
+            webkit.messageHandlers.logger.postMessage('[_TSORPC:cancelTrade] error: ' + e);
         });
     }
 
@@ -409,6 +474,7 @@
         dispatchSpecialist: dispatchSpecialist,
         dispatchBuff: dispatchBuff,
         dispatchTrade: dispatchTrade,
+        dispatchCancelTrade: dispatchCancelTrade,
     };
     window._TSOAMFWriter = AMFWriter;
 
@@ -422,6 +488,9 @@
         });
         window.TSOBridge.register('DISPATCH_TRADE', function(p) {
             dispatchTrade(p);
+        });
+        window.TSOBridge.register('CANCEL_TRADE', function(p) {
+            dispatchCancelTrade(p);
         });
         window.TSOBridge.register('RPC_SEND', function(p) {
             sendAMF(p.args || []);

@@ -105,6 +105,10 @@ final class CapturingDispatcher: SpecialistDispatchPort, BuffDispatchPort, Trade
             lots: lots,
             slotType: slotType))
     }
+
+    func cancelTrade(tradeId: Int) {
+        sent.append(CancelTradeCommand(tradeId: tradeId))
+    }
 }
 
 // In-memory JSON file store keyed by filename. Used by ResourcesStore tests
