@@ -1,7 +1,7 @@
 {
   "subgroups": {
     "Stone Mason":                 "Aunt Irma's Feast",
-    "Granite Mason":               "Stadium Snacks",
+    "Granite Mason":               "Aunt Irma's Feast",
     "Marble Mason":                "Aunt Irma's Feast",
 
     "Copper Mine":                 "Aunt Irma's Feast",
@@ -90,7 +90,7 @@
     "Elari Finesmith":             "Aunt Irma's Feast",
     "Lettersmith":                 "Aunt Irma's Feast",
     "Improved Lettersmith":        "Aunt Irma's Feast",
-    "Ornamentalsmith":             "",
+    "Ornamentalsmith":             "Aunt Irma's Feast",
 
     "Bookbinder":                  "",
     "Adventure Bookbinder":        "",
@@ -133,7 +133,6 @@
       "StarfallStarExtractor2",
       "Tavern",
       "VillageSchool",
-      "WhiteCastle",
       "lanternSingle",
       "pvp_progression_building",
       "stoneFlowered",
