@@ -56,6 +56,17 @@ function buildNetSandbox({ withWS = false } = {}) {
     FakeXHR.prototype.send = function() {};
     FakeXHR.prototype.addEventListener = function() {};
 
+    // Minimal Response stub — amf3-net's inbound AMF branch reconstructs a
+    // fresh Response from the consumed ArrayBuffer instead of cloning the
+    // original. Tests only need identity + arrayBuffer round-trip.
+    function FakeResponse(buf, init) {
+        this.status     = (init && init.status)     || 200;
+        this.statusText = (init && init.statusText) || 'OK';
+        this.headers    = (init && init.headers)    || { get: () => '' };
+        this._buf       = buf;
+    }
+    FakeResponse.prototype.arrayBuffer = function() { return Promise.resolve(this._buf); };
+
     const sandbox = {
         window: {
             _TSOAMFParser: FakeParser,
@@ -72,6 +83,7 @@ function buildNetSandbox({ withWS = false } = {}) {
         console,
         TextEncoder, TextDecoder,
         Blob, ArrayBuffer, Uint8Array, Promise,
+        Response: FakeResponse,
         webkit: { messageHandlers: { logger: { postMessage: (s) => logs.push(s) } } },
         // Capturing setTimeout — store callbacks, fire on demand so we can
         // assert both the "scheduled but not yet run" and "run" states.
@@ -87,15 +99,13 @@ function buildNetSandbox({ withWS = false } = {}) {
     vm.createContext(sandbox);
 
     // Pre-stub the inbound fetch the IIFE will wrap. Each test reassigns
-    // sandbox.window.fetch to control response shape (or absence).
+    // sandbox.window.fetch to control response shape (or absence). The AMF
+    // branch reads response.arrayBuffer() directly and reconstructs a Response
+    // (no .clone() — the previous clone doubled the body in memory).
     sandbox.window.fetch = () => Promise.resolve({
+        status: 200, statusText: 'OK',
         headers: { get: () => 'application/x-amf' },
-        clone() {
-            return {
-                arrayBuffer: () => Promise.resolve(new ArrayBuffer(16)),
-                text:        () => Promise.resolve(''),
-            };
-        },
+        arrayBuffer: () => Promise.resolve(new ArrayBuffer(16)),
     });
 
     const src = fs.readFileSync(path.join(JS_DIR, 'amf3-net.js'), 'utf8');

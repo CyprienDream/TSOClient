@@ -21,6 +21,7 @@
 /* End PBXContainerItemProxy section */
 
 /* Begin PBXFileReference section */
+		B4A7F3912FFABA7000D59B9B /* sample_logs.md */ = {isa = PBXFileReference; lastKnownFileType = net.daringfireball.markdown; path = sample_logs.md; sourceTree = "<group>"; };
 		B4FD0DE82FA1722A00272AE1 /* TSOClient.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = TSOClient.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		B4FD0DF72FA172C400272AE1 /* WebKit.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = WebKit.framework; path = System/Library/Frameworks/WebKit.framework; sourceTree = SDKROOT; };
 		B4FD0DFA2FA172C400272AE1 /* CLAUDE.md */ = {isa = PBXFileReference; lastKnownFileType = net.daringfireball.markdown; name = CLAUDE.md; path = ../CLAUDE.md; sourceTree = SOURCE_ROOT; };
@@ -98,6 +99,7 @@
 		B4FD0DF92FA172C400272AE1 /* Documentation */ = {
 			isa = PBXGroup;
 			children = (
+				B4A7F3912FFABA7000D59B9B /* sample_logs.md */,
 				B4FD0DFA2FA172C400272AE1 /* CLAUDE.md */,
 				B4FD0DFB2FA172C400272AE1 /* README.md */,
 				B4FD0DFC2FA172C400272AE1 /* log.md */,

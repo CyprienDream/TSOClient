@@ -7,6 +7,7 @@
   { "displayName": "Iron Mine",                         "skinBases": ["IronMine"],                               "group": "Mines" },
   { "displayName": "Gold Mine",                         "skinBases": ["GoldMine"],                               "group": "Mines" },
   { "displayName": "Epic Coal Mine",                    "skinBases": ["EpicCoalMine"],                           "group": "Mines" },
+  { "displayName": "Titanium Mine",                     "skinBases": ["TitaniumMine"],                            "group": "Mines" },
 
   { "displayName": "Copper Smelter",                    "skinBases": ["BronzeSmelter"],                          "group": "Smelters" },
   { "displayName": "Iron Smelter",                      "skinBases": ["IronSmelter"],                            "group": "Smelters" },
@@ -101,5 +102,6 @@
   { "displayName": "Toolmaker",                         "skinBases": ["Toolmaker"] },
 
   { "displayName": "Rabbit Retreat",                    "skinBases": ["RabbitBreeding"] },
-  { "displayName": "Mountain Clan Colossus",            "skinBases": ["MountainClanColossus"] }
+  { "displayName": "Mountain Clan Colossus",            "skinBases": ["MountainClanColossus"] },
+  { "displayName": "Mystical Castle",                   "skinBases": ["WhiteCastle"] },
 ]
