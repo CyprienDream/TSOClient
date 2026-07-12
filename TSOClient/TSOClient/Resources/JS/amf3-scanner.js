@@ -220,9 +220,22 @@
         for (var k = 0; k < keys.length; k++) {
             var key = keys[k];
             if (key === '__class' || key === 'source') continue;
+            // Skip subtrees no consumer walks. armyVO (unit composition, deep
+            // per specialist), skills / eventSkills (SkillVO arrays we harvest
+            // directly at the dSpecialistVO push, not via the tree walk),
+            // battlesFought/unitsProduced (large stat arrays on Generals).
+            // These skips cap the ctx.seen WeakSet size and Object.keys churn
+            // during the walk.
+            if (SCAN_SKIP_KEYS[key]) continue;
             scanTree(v[key], depth + 1, ctx, nextParent);
         }
     }
+
+    var SCAN_SKIP_KEYS = {
+        armyVO:       1,
+        skills:       1,
+        eventSkills:  1,
+    };
 
     function newCtx() {
         return {
@@ -267,15 +280,6 @@
         return name.indexOf('PremiumFriendBuff') >= 0;
     }
 
-    // Module-level dedup: per (rootClass, fieldName), log the discovery
-    // once. PFB-positive hits always re-log so the user can confirm the
-    // auto-detection is firing on every payload it should.
-    var _pfbVecLoggedFields  = {};
-    // One-shot dumps so we don't re-flood the log after the first capture.
-    var _pfbDumpedRootKeys      = {};
-    var _pfbDumpedBuffClasses   = false;
-    var _pfbDumpedAllAppliances = false;
-
     // Known buff-definition IDs that mean "active Prestigious Friend Buff".
     // dPersistedBuffApplianceVO.buffID is a numeric reference to the buff
     // definition; the appliance never carries the name string. Confirmed on
@@ -286,74 +290,11 @@
     // dump when those are seen and add them here.
     var PFB_BUFF_IDS = { 663: '15Day' };
 
-    // Best-effort summary of a single field value so the one-shot key dump
-    // is human-readable: "Array len=12", "dRunningBuffVO", "number(1234)",
-    // "vec<dBuffVO>[217]", etc. Tells us which fields *might* hold buffs
-    // without having to dump the whole tree.
-    function summarizeField(v) {
-        if (v == null) return 'null';
-        if (typeof v !== 'object') return typeof v + '(' + String(v).slice(0, 30) + ')';
-        if (Array.isArray(v)) {
-            var first = v[0];
-            return 'Array[' + v.length + ']' + (first && first.__class
-                ? '<' + first.__class.split('.').pop() + '>' : '');
-        }
-        if (Array.isArray(v.source)) {
-            var firstS = v.source[0];
-            return 'Vector[' + v.source.length + ']' + (firstS && firstS.__class
-                ? '<' + firstS.__class.split('.').pop() + '>' : '');
-        }
-        return (v.__class ? v.__class.split('.').pop() : 'object') +
-               '{' + Object.keys(v).slice(0, 4).join(',') + '}';
-    }
-
-    function dumpRootKeysOnce(root, rootCls) {
-        if (!root || _pfbDumpedRootKeys[rootCls]) return;
-        _pfbDumpedRootKeys[rootCls] = true;
-        var keys = Object.keys(root);
-        for (var i = 0; i < keys.length; i++) {
-            var k = keys[i];
-            if (k === '__class') continue;
-            window._tsoDiagLog(
-                '[PFB:rootkey] ' + rootCls + '.' + k + ' = ' + summarizeField(root[k])
-            );
-        }
-    }
-
     function scanForPlayerBuffs(ctx) {
         var pfbActive    = false;
         var vectorsSeen  = 0;
         var pfbHits      = 0;
         var pfbFromField = null;   // first field where we found a hit (debug)
-
-        // First-time dump of every key on dPlayerVO / dZoneVO so we can spot
-        // candidates the vector scan misses: scalars (timestamps), single
-        // VOs (a buff reference), or differently-named buff vectors.
-        for (var pi0 = 0; pi0 < ctx.playerVOs.length; pi0++) {
-            dumpRootKeysOnce(ctx.playerVOs[pi0], 'dPlayerVO');
-        }
-        for (var zi0 = 0; zi0 < ctx.zoneVOs.length;   zi0++) {
-            dumpRootKeysOnce(ctx.zoneVOs[zi0],   'dZoneVO');
-        }
-
-        // First-time dump of every class name containing "Buff" and its
-        // count, so we can see whether anything other than dBuffVO exists
-        // (e.g. dRunningBuffVO, dActiveBuffVO, dZoneBuffVO).
-        if (!_pfbDumpedBuffClasses) {
-            var buffClasses = [];
-            for (var clsName in ctx.classes) {
-                if (clsName.toLowerCase().indexOf('buff') >= 0) {
-                    buffClasses.push(clsName.split('.').pop() + '=' + ctx.classes[clsName]);
-                }
-            }
-            if (buffClasses.length > 0) {
-                _pfbDumpedBuffClasses = true;
-                buffClasses.sort();
-                window._tsoDiagLog(
-                    '[PFB:buffclasses] ' + buffClasses.join(', ')
-                );
-            }
-        }
 
         function scanRoot(root, rootCls) {
             if (!root) return;
@@ -389,26 +330,6 @@
                     pfbActive = true;
                     if (!pfbFromField) pfbFromField = rootCls + '.' + key;
                 }
-
-                var dedupKey = rootCls + '.' + key;
-                var alreadyLogged = !!_pfbVecLoggedFields[dedupKey];
-                if (!alreadyLogged || hits > 0) {
-                    _pfbVecLoggedFields[dedupKey] = true;
-                    window._tsoDiagLog(
-                        '[PFB:vec] ' + dedupKey +
-                        ' total=' + list.length +
-                        ' pfbHits=' + hits +
-                        (isInventory ? ' (inventory)' : '') +
-                        ' first.cls=' + (first.__class || '?') +
-                        ' first.name=' + first.buffName_string
-                    );
-                    if (sampleHit) {
-                        window._tsoDiagLog(
-                            '[PFB:vec.sample] ' + dedupKey + ' ' +
-                            JSON.stringify(sampleHit).slice(0, 600)
-                        );
-                    }
-                }
             }
         }
 
@@ -434,18 +355,6 @@
                 var first = list[0];
                 if (!first || typeof first !== 'object' || !first.__class) continue;
                 if (first.__class.indexOf('BuffAppliance') < 0) continue;
-
-                // One-shot full dump of every appliance in this vector so
-                // unknown PFB variants (7Day/15Day) can be identified by ID.
-                if (!_pfbDumpedAllAppliances) {
-                    _pfbDumpedAllAppliances = true;
-                    for (var di = 0; di < list.length; di++) {
-                        window._tsoDiagLog(
-                            '[PFB:appliance.all] ' + rootCls + '.' + k +
-                            '[' + di + '] = ' + JSON.stringify(list[di]).slice(0, 800)
-                        );
-                    }
-                }
 
                 for (var li = 0; li < list.length; li++) {
                     var appl = list[li];
@@ -577,38 +486,41 @@
                         var sr = (body.__class && body.__class.indexOf('dServerResponse') >= 0) ? body : null;
                         if (!sr && body.data && body.data.__class && body.data.__class.indexOf('dServerResponse') >= 0) sr = body.data;
                         if (!sr) return;
-                        var srJson = '';
-                        try { srJson = JSON.stringify(sr, null, 2); } catch (_) {}
-                        window._tsoDiagLog(
-                            '[AMF3:' + channel + '] ack type=' + sr.type +
-                            ' errorCode=' + (sr.data && sr.data.errorCode) +
-                            ' full=' + srJson.slice(0, 1500));
 
-                        // Trade / friend / guild inbound — ungated, large
-                        // body. The existing diag log truncates at 1500 chars
-                        // which cuts off both the full trade list and the
-                        // guild member roster; this branch keeps the first
-                        // ~16k so a 98-member guild fits.
-                        var tag = srJson.indexOf('TradeWindow')              >= 0 ||
-                                  srJson.indexOf('DirectTrade')              >= 0 ||
-                                  srJson.indexOf('Mail')                     >= 0 ||
-                                  srJson.indexOf('Gift')                     >= 0 ||
-                                  srJson.indexOf('Donat')                    >= 0 ||
-                                  srJson.indexOf('SendResources')            >= 0 ||
-                                  srJson.indexOf('Player2Player')            >= 0 ||
-                                  srJson.indexOf('PlayerToPlayer')           >= 0 ? 'Trade'
-                                : srJson.indexOf('Guild.dGuildVO')           >= 0 ||
-                                  srJson.indexOf('dGuildPlayerListItemVO')   >= 0 ? 'Guild'
-                                : srJson.indexOf('dPlayerListVO')            >= 0 ||
-                                  srJson.indexOf('dPlayerListItemVO')        >= 0 ? 'Friends'
-                                : null;
-                        if (tag) {
-                            webkit.messageHandlers.logger.postMessage(
-                                '[' + tag + ':in:' + channel + '] type=' + sr.type +
+                        // Diag-only recon: pretty-stringifying every ack was
+                        // ~tens of KB of allocation per response (guild rosters
+                        // and trade windows are large). Gate the full block on
+                        // _tsoDiag so shipped features pay nothing. The typed
+                        // extractors below (1014/1062/4014) still run.
+                        if (window._tsoDiag) {
+                            var srJson = '';
+                            try { srJson = JSON.stringify(sr); } catch (_) {}
+                            window._tsoDiagLog(
+                                '[AMF3:' + channel + '] ack type=' + sr.type +
                                 ' errorCode=' + (sr.data && sr.data.errorCode) +
-                                ' bytes=' + srJson.length +
-                                ' full=' + srJson.slice(0, 16000)
-                            );
+                                ' full=' + srJson.slice(0, 1500));
+
+                            var tag = srJson.indexOf('TradeWindow')              >= 0 ||
+                                      srJson.indexOf('DirectTrade')              >= 0 ||
+                                      srJson.indexOf('Mail')                     >= 0 ||
+                                      srJson.indexOf('Gift')                     >= 0 ||
+                                      srJson.indexOf('Donat')                    >= 0 ||
+                                      srJson.indexOf('SendResources')            >= 0 ||
+                                      srJson.indexOf('Player2Player')            >= 0 ||
+                                      srJson.indexOf('PlayerToPlayer')           >= 0 ? 'Trade'
+                                    : srJson.indexOf('Guild.dGuildVO')           >= 0 ||
+                                      srJson.indexOf('dGuildPlayerListItemVO')   >= 0 ? 'Guild'
+                                    : srJson.indexOf('dPlayerListVO')            >= 0 ||
+                                      srJson.indexOf('dPlayerListItemVO')        >= 0 ? 'Friends'
+                                    : null;
+                            if (tag) {
+                                webkit.messageHandlers.logger.postMessage(
+                                    '[' + tag + ':in:' + channel + '] type=' + sr.type +
+                                    ' errorCode=' + (sr.data && sr.data.errorCode) +
+                                    ' bytes=' + srJson.length +
+                                    ' full=' + srJson.slice(0, 16000)
+                                );
+                            }
                         }
 
                         // FRIENDS: dServerResponse type=1014 carries dPlayerListVO

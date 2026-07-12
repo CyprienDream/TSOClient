@@ -9,6 +9,7 @@ A native macOS wrapper around The Settlers Online (TSO), built as an automation 
 - Building textures **are** fetched individually via `fetch()` from Ubisoft's CDN (`ubistatic-a.akamaihd.net/frontend/GFX_HASHED/building_lib/<sha1>.png`). This is how the collectible texture patcher works: it intercepts those fetches and returns a synthetic pink PNG for known collectible hashes. `<img>` elements are not used for game art.
 - `gameevents.registerHook` exposes only coarse lifecycle triggers (`triggerLevelUp`, `triggerTutorialEnd`, `triggerFriendInvite`, `triggerClientLoaded`); not useful for game-state reading.
 - **In-game UI does not refresh on injected dispatch.** Unity is locally authoritative for the star-menu specialist icon: the in-game click handler updates wasm state *before* the network call. Our injected `fetch` reaches the server (specialist actually starts the task), but Unity has no reason to repaint until the next zone reload. This is **structurally unfixable from JS** — see "Unity UI refresh dead end" below.
+- The Unity wasm heap + GPU texture cache is the dominant RAM cost (base ~900 MB, grows to 2+ GB after visiting other zones). We can shrink WebKit's network cache and our own JS allocations, but the wasm/GPU footprint is Unity's, not ours.
 
 **Shipped automation:**
 - **Collectible Highlighter** — texture substitution renders all 55 collectible types pink in-world.
@@ -144,7 +145,6 @@ Injection order is dependency-ordered; everything runs at `atDocumentStart`.
 | `amf3-net.js` | (wraps `fetch` + `XMLHttpRequest`) | Hands inbound buffers to the scanner, outbound bodies to the classifier; caches auth in `window._tsoAuthCtx`, tracks `window._tsoLastSeq` |
 | `amf3-encoder.js` | `window._TSORPC`, registers `DISPATCH_SPECIALIST` / `DISPATCH_BUFF` handlers | Trait-DSL AMF3 serializer; builds `RemotingMessage` envelopes for outbound RPC |
 | `collectible-patcher.js` | (wraps `fetch` + `XHR` *again*) | Returns synthetic 32×32 hot-pink PNG for the 55 known collectible building-texture hashes |
-| `unity-probe.js` | `window._tsoUnity`, `window._tsoUnityProbe` | Captures the Unity instance via a `MutationObserver`; recon completed (see "Unity UI refresh dead end"); not load-bearing today |
 
 ## Bridge protocol
 
@@ -258,7 +258,7 @@ GameServer realm: `https://r03-gs003.thesettlersonline.com/GameServer/amf` (snif
 ## Key invariants
 
 - `WebView.updateNSView` guards `webView.url == nil` — do not remove this or the game reloads on every SwiftUI state change.
-- JS injection order: **bridge → amf3-parser → amf3-classifier → amf3-scanner → amf3-net → amf3-encoder → collectible-patcher → unity-probe**. The patcher must run **after** amf3-net because it wraps `window.fetch` *again* — reversing the order breaks AMF3 parsing on non-collectible URLs. amf3-scanner depends on `_TSOAMFParser` + `_tsoClassifier`; amf3-net depends on `_tsoScanner`. unity-probe touches only `window.createUnityInstance` so its order relative to the fetch chain doesn't matter.
+- JS injection order: **bridge → amf3-parser → amf3-classifier → amf3-scanner → amf3-net → amf3-encoder → collectible-patcher**. The patcher must run **after** amf3-net because it wraps `window.fetch` *again* — reversing the order breaks AMF3 parsing on non-collectible URLs. amf3-scanner depends on `_TSOAMFParser` + `_tsoClassifier`; amf3-net depends on `_tsoScanner`.
 - AMF3 VO trait member order is load-bearing on the wire. `amf3-encoder.js` enforces it mechanically via the `trait(cls, members)` DSL — DO NOT reorder member arrays.
 - `WKUserContentController.add(_:name:)` retains the handler — `WebViewCoordinator` is `NSObject`, no extra wrapper needed.
 - `@Observable` (Swift 5.9 macro, not `ObservableObject`). Use `@State` at the owner site; the class reference propagates automatically.
@@ -270,9 +270,9 @@ GameServer realm: `https://r03-gs003.thesettlersonline.com/GameServer/amf` (snif
 
 **There is no JS-side way to make Unity repaint the specialist icon / countdown bar after an injected dispatch.** Unity is locally authoritative: its in-game click handler updates wasm state *before* firing the network call. Our injection skips the click handler, so the network call lands but Unity has no reason to repaint. The icon catches up on the next zone reload.
 
-What was tried:
-- `unity-probe.js` wraps `window.createUnityInstance` and exposes the Unity instance as `window._tsoUnity`. `SendMessage`, `Module.ccall`, `Module.cwrap`, `Module._SendMessage*` are all reachable.
-- Clicking the in-game dispatch button produces **zero `SendMessage` calls** — Unity handles the click entirely in wasm. The JS bridge is one-way (host→Unity); the in-game UI never traverses it.
+What was tried (module deleted 2026-07-12 — recon complete):
+- A `unity-probe.js` module wrapped `window.createUnityInstance` and exposed the Unity instance as `window._tsoUnity`. `SendMessage`, `Module.ccall`, `Module.cwrap`, `Module._SendMessage*` were all reachable.
+- Clicking the in-game dispatch button produced **zero `SendMessage` calls** — Unity handles the click entirely in wasm. The JS bridge is one-way (host→Unity); the in-game UI never traverses it.
 - **Module exports are stripped** — no `_Specialist*` / `_Refresh*` / `_Zone*` / `_Update*` symbols. Only Emscripten standard exports + the three `_SendMessage*` variants. Nothing useful to `ccall`.
 - Manual in-game dispatch emits a single `type=95 actionType=0` — byte-identical to ours. No follow-up refresh opcode exists.
 

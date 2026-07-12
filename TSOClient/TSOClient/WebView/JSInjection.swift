@@ -1,7 +1,7 @@
 import WebKit
 
 // Loads the active JS modules from Resources/JS/ in the required injection
-// order: bridge → parser → classifier → scanner → net → encoder → patcher → unity-probe.
+// order: bridge → parser → classifier → scanner → net → encoder → patcher.
 enum JSInjection {
 
     // Injection order matters:
@@ -14,8 +14,6 @@ enum JSInjection {
     //   collectible-patcher — wraps window.fetch AGAIN (must run after amf3-net
     //     so it wraps the already-wrapped fetch; otherwise AMF3 parsing on
     //     non-collectible URLs breaks). DO NOT reorder.
-    //   unity-probe — touches window.createUnityInstance only; ordering relative
-    //     to the fetch chain doesn't matter.
     static func modules() -> [JSModule] {
         [
             JSModule("bridge"),
@@ -32,7 +30,6 @@ enum JSInjection {
                 }
                 return src.replacingOccurrences(of: "/*__HASHES__*/[]", with: hashJSON)
             }),
-            JSModule("unity-probe"),
         ]
     }
 
@@ -41,7 +38,7 @@ enum JSInjection {
             var src = load(module.name)
             if let preProcess = module.preProcess { src = preProcess(src) }
             controller.addUserScript(
-                WKUserScript(source: src, injectionTime: .atDocumentStart, forMainFrameOnly: false)
+                WKUserScript(source: src, injectionTime: .atDocumentStart, forMainFrameOnly: true)
             )
         }
     }

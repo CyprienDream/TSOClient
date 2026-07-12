@@ -11,6 +11,11 @@ struct WebView: NSViewRepresentable {
     let inbound: InboundDispatcher
     let logger: Logger
 
+    // Purges the WebKit network process's in-memory + fetch caches every
+    // 5 min. WKWebView's cache is otherwise unbounded across a session and
+    // grows steadily as the Unity build streams texture bundles.
+    private static var cachePurgeTimer: Timer?
+
     func makeNSView(context: Context) -> WKWebView {
         let config = WKWebViewConfiguration()
         config.preferences.javaScriptCanOpenWindowsAutomatically = true
@@ -29,9 +34,22 @@ struct WebView: NSViewRepresentable {
             "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) " +
             "AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Safari/605.1.15"
 
+        #if DEBUG
         webView.isInspectable = true
+        #endif
         context.coordinator.webView = webView
         executor.webView = webView  // Assign before any UI can trigger a dispatch.
+
+        if Self.cachePurgeTimer == nil {
+            let store = config.websiteDataStore
+            let types: Set<String> = [
+                WKWebsiteDataTypeMemoryCache,
+                WKWebsiteDataTypeFetchCache,
+            ]
+            Self.cachePurgeTimer = Timer.scheduledTimer(withTimeInterval: 300, repeats: true) { _ in
+                store.removeData(ofTypes: types, modifiedSince: .distantPast) { }
+            }
+        }
         return webView
     }
 

@@ -30,4 +30,16 @@ final class WKWebViewJSExecutor: JSExecutor {
             }
         }
     }
+
+    // Tears down the current page's JS heap + GL context. Used by the
+    // "Reload" button to reclaim Unity's texture pool + wasm heap when
+    // long play sessions accumulate memory.
+    func reloadGame() {
+        guard let webView else {
+            logger.log("[Reload] webView is nil — reload skipped")
+            return
+        }
+        logger.log("[Reload] reloading WKWebView to reset RAM")
+        webView.reload()
+    }
 }

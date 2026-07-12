@@ -17,12 +17,20 @@ struct ContentView: View {
             .frame(minWidth: 800, minHeight: 768)
 
             VStack(spacing: 0) {
-                Picker("Tab", selection: $activeTab) {
-                    Text("Specialists").tag(SideTab.specialists)
-                    Text("Buffs").tag(SideTab.buffs)
-                    Text("Trade").tag(SideTab.trade)
+                HStack(spacing: 8) {
+                    Picker("Tab", selection: $activeTab) {
+                        Text("Specialists").tag(SideTab.specialists)
+                        Text("Buffs").tag(SideTab.buffs)
+                        Text("Trade").tag(SideTab.trade)
+                    }
+                    .pickerStyle(.segmented)
+
+                    Button(action: { env.executor.reloadGame() }) {
+                        Image(systemName: "arrow.clockwise")
+                    }
+                    .buttonStyle(.borderless)
+                    .help("Reload game — resets RAM by tearing down Unity's heap + GL context")
                 }
-                .pickerStyle(.segmented)
                 .padding(8)
 
                 Divider()

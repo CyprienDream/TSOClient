@@ -363,37 +363,26 @@
                            ct.includes('octet-stream')) &&
                           !isSkippableAMFUrl(url);
             if (wantAMF) {
-                response.clone().arrayBuffer().then(function(buf) {
+                // Consume the body ONCE and re-serve a synthetic Response from
+                // the same ArrayBuffer. The previous response.clone() path kept
+                // the body double-buffered for the length of the async parse —
+                // on zone-load responses (hundreds of KB) that dominated our
+                // per-frame allocation. The game's own .then(r => r.arrayBuffer())
+                // now hits a Response whose buffer is already resident, so the
+                // read is a no-op and net latency is unchanged.
+                return response.arrayBuffer().then(function(buf) {
                     if (buf.byteLength > 3) {
-                        // Defer the AMF walk so the game's own response
-                        // handler (and WebGL frame submit) runs first.
                         defer(function() { scanner.analyzeAMFBuffer(buf, 'fetch'); });
                     }
+                    return new Response(buf, {
+                        status:     response.status,
+                        statusText: response.statusText,
+                        headers:    response.headers,
+                    });
                 }).catch(function(e) {
                     webkit.messageHandlers.logger.postMessage('[AMF3:fetch] buffer error: ' + e);
+                    return response;
                 });
-            } else if (ct.includes('json') || ct.includes('javascript')) {
-                // Scan non-AMF JSON/JS responses once per URL for task config data.
-                var scanKey = 'tsoCfgScanned:' + url;
-                if (!window[scanKey]) {
-                    window[scanKey] = true;
-                    response.clone().text().then(function(text) {
-                        var lower = text.toLowerCase();
-                        var hasDuration = lower.indexOf('duration') >= 0 ||
-                                         lower.indexOf('specialist') >= 0 ||
-                                         lower.indexOf('explorer') >= 0 ||
-                                         lower.indexOf('geologist') >= 0 ||
-                                         lower.indexOf('tasktime') >= 0 ||
-                                         lower.indexOf('task_time') >= 0 ||
-                                         lower.indexOf('findtreasure') >= 0 ||
-                                         lower.indexOf('findeventzone') >= 0;
-                        if (hasDuration) {
-                            webkit.messageHandlers.logger.postMessage(
-                                '[AMF3:cfg] JSON hit: ' + url.slice(0, 200) +
-                                ' | sample: ' + text.slice(0, 400));
-                        }
-                    }).catch(function(){});
-                }
             }
             return response;
         });
