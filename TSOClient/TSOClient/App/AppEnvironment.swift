@@ -11,6 +11,7 @@ struct AppEnvironment {
     let buffs: BuffsStore
     let recipients: RecipientsStore
     let resources: ResourcesStore
+    let publicTrades: PublicTradesStore
     let executor: WKWebViewJSExecutor     // late-binding webView holder
     let sender: BridgeSender              // produces JS via WireCommandJSSerializing
     let inbound: InboundDispatcher
@@ -34,6 +35,8 @@ struct AppEnvironment {
         self.recipients = recipients
         let resources = ResourcesStore(logger: logger)
         self.resources = resources
+        let publicTrades = PublicTradesStore()
+        self.publicTrades = publicTrades
         let executor = WKWebViewJSExecutor(logger: logger)
         self.executor = executor
         let sender = BridgeSender(logger: logger, executor: executor)
@@ -44,7 +47,8 @@ struct AppEnvironment {
         self.specialistDispatch = specialistDispatch
 
         self.tradeCoordinator = TradeCoordinator(
-            recipients: recipients, dispatcher: sender, logger: logger)
+            recipients: recipients, publicTrades: publicTrades,
+            dispatcher: sender, logger: logger)
 
         let inbound = InboundDispatcher(logger: logger)
         inbound.register(CollectiblesHandler(store: collectibles))
@@ -56,8 +60,9 @@ struct AppEnvironment {
         inbound.register(FriendsHandler(store: recipients, logger: logger))
         inbound.register(GuildMembersHandler(store: recipients, logger: logger))
         inbound.register(ResourcesHandler(store: resources, logger: logger))
+        inbound.register(PublicTradesHandler(store: publicTrades, logger: logger))
         inbound.register(GameStateHandler(
-            stores: [collectibles, specialists, buildings, buffs],
+            stores: [collectibles, specialists, buildings, buffs, publicTrades],
             logger: logger
         ))
         self.inbound = inbound

@@ -54,6 +54,7 @@ struct GameStateHandlerTests {
         let specs        = SpecialistsStore()
         let buildings    = BuildingsStore()
         let buffs        = BuffsStore(naming: .empty)
+        let publicTrades = PublicTradesStore()
 
         // Seed each with a value so we can verify the wipe.
         collectibles.apply(.init(mapWidth: 1, mapHeight: 1,
@@ -68,9 +69,11 @@ struct GameStateHandlerTests {
                                             uid1: 0, uid2: 0, activeBuff: nil)]))
         buffs.apply(.init(items: [.init(uid1: 0, uid2: 0, buffName: "X",
                                         resourceName: "", amount: 1, insertedAt: 0)]))
+        publicTrades.apply(.init(items: [.init(id: 1, slotType: 0, slotPos: 0, type: 0,
+                                               offer: "A|B|1", remainingTime: 0, lotsRemaining: 1)]))
 
         let handler = GameStateHandler(
-            stores: [collectibles, specs, buildings, buffs],
+            stores: [collectibles, specs, buildings, buffs, publicTrades],
             logger: MockLogger())
         try handler.apply(payloadData: encode(["state": "ZONE_LEFT", "zoneId": NSNull()]))
 
@@ -78,6 +81,7 @@ struct GameStateHandlerTests {
         #expect(specs.items.isEmpty)
         #expect(buildings.items.isEmpty)
         #expect(buffs.items.isEmpty)
+        #expect(publicTrades.items.isEmpty)
     }
 
     @Test func nonZoneLeftStatesDoNotClear() throws {

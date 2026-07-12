@@ -23,6 +23,7 @@ protocol TradeDispatchPort {
                        costsResource: String, costsAmount: Int,
                        lots: Int,
                        slotType: Int)
+    func cancelTrade(tradeId: Int)
 }
 
 // BridgeSender is the production conformer for both ports: it constructs
@@ -60,5 +61,9 @@ extension BridgeSender: TradeDispatchPort {
             costsResource: costsResource, costsAmount: costsAmount,
             lots: lots,
             slotType: slotType))
+    }
+
+    func cancelTrade(tradeId: Int) {
+        send(CancelTradeCommand(tradeId: tradeId))
     }
 }
