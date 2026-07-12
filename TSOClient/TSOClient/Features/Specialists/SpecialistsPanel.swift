@@ -5,16 +5,16 @@ struct SpecialistsPanel: View {
     var store: SpecialistsStore
     var coordinator: SpecialistDispatchCoordinator
 
-    @State private var filter: SpecialistKind? = nil   // nil = All
+    @State private var filter: SpecialistKind = .explorer
     // Single 1Hz tick fanned out to every visible row's countdown. Each row used
     // to own its own Timer.publish, which scaled badly with specialist count.
     @State private var now = Date()
     private let tick = Timer.publish(every: 1, on: .main, in: .common).autoconnect()
 
-    private let filters: [SpecialistKind?] = [nil, .geologist, .explorer, .general]
+    private let filters: [SpecialistKind] = [.geologist, .explorer, .general]
 
     var filtered: [SpecialistItem] {
-        let base = filter.map { kind in store.items.filter { $0.specialistType == kind } } ?? store.items
+        let base = store.items.filter { $0.specialistType == filter }
         let formatter = store.formatter
         return base.sorted { lhs, rhs in
             formatter.displayPrimary(for: lhs)
@@ -101,7 +101,7 @@ struct SpecialistsPanel: View {
     private var filterChips: some View {
         HStack(spacing: 6) {
             ForEach(filters, id: \.self) { f in
-                Button(f?.rawValue ?? "All") { filter = f }
+                Button(f.rawValue) { filter = f }
                     .buttonStyle(.bordered)
                     .controlSize(.small)
                     .tint(filter == f ? .accentColor : .secondary)
@@ -133,8 +133,8 @@ struct SpecialistsPanel: View {
     // individual row pickers all show the chosen task.
     @ViewBuilder
     private var bulkTaskPickers: some View {
-        let showGeo = filter == nil || filter == .geologist
-        let showExp = filter == nil || filter == .explorer
+        let showGeo = filter == .geologist
+        let showExp = filter == .explorer
         if showGeo || showExp {
             VStack(alignment: .leading, spacing: 4) {
                 if showGeo {
@@ -214,7 +214,7 @@ struct SpecialistsPanel: View {
     // durations aren't predictable enough yet to estimate completion.
     @ViewBuilder
     private var autoGeologistLoopSection: some View {
-        if filter == nil || filter == .geologist {
+        if filter == .geologist {
             VStack(alignment: .leading, spacing: 4) {
                 ForEach(GeologistAutoLoopSubtype.supported) { sub in
                     Divider()
@@ -276,7 +276,7 @@ struct SpecialistsPanel: View {
 
     @ViewBuilder
     private var autoExplorerLoopSection: some View {
-        if filter == nil || filter == .explorer {
+        if filter == .explorer {
             VStack(alignment: .leading, spacing: 4) {
                 Divider()
                 HStack {
