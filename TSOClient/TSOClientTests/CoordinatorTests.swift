@@ -485,6 +485,91 @@ struct BuffDispatchCoordinatorTests {
         }
     }
 
+    @Test func buffAllShowsBannerAndCoalescesBursts() async {
+        // Mirrors explorerDispatchShowsBannerAndCoalescesBursts —
+        // BuffsPanel surfaces the same signal after a bulk dispatch.
+        //
+        // Hide delay is kept long here because buffAll goes through
+        // BulkDispatcher's Task, so `await task?.value` yields — on slower
+        // machines (CI) the hide timer can otherwise fire before the
+        // assertion runs. The specialist banner test covers the "clears
+        // after hide delay" behavior — that path uses dispatchOne
+        // synchronously, so the timer can't race there. Both banners share
+        // the same hide-timer shape, so re-testing it here would just
+        // duplicate that coverage with a 5+ second sleep window.
+        let naming = NamingRegistry(specialistSubtypes: [:],
+                                    buffs: ["ProductivityBuffLvl3": "Aunt Irma's Basket"],
+                                    buildings: [:])
+        let buffs = BuffsStore(naming: naming)
+        buffs.apply(InboundMessage.BuffsPayload(items: [
+            .init(uid1: 100, uid2: 200, buffName: "ProductivityBuffLvl3",
+                  resourceName: "", amount: 50, insertedAt: 0),
+        ]))
+        let buildings = makeBuildingsStore(grids: [10, 20, 30])
+        let coord = BuffDispatchCoordinator(
+            buffsStore: buffs,
+            buildingsStore: buildings,
+            dispatcher: CapturingDispatcher(),
+            classifier: .empty,
+            bulk: BulkDispatcher(interCallDelayNs: 0),
+            logger: MockLogger())
+        coord.buffBannerHideDelay = 30   // survive CI await race
+
+        #expect(coord.buffBannerText == nil)
+
+        let task = coord.buffAll(group: buildings.items, buffName: "ProductivityBuffLvl3")
+        await task?.value
+
+        // Three dispatches coalesced into a single plural banner carrying
+        // the buff display name from NamingRegistry.
+        #expect(coord.buffBannerText?.hasPrefix("3 buildings buffed") == true)
+        #expect(coord.buffBannerText?.contains("Aunt Irma's Basket") == true)
+    }
+
+    @Test func buffAllGroupsMixedBuffsDropsLabelSuffix() async {
+        // Master "Buff all" that dispatches two different buffs across two
+        // categories: banner should show the count but drop the "· <name>"
+        // suffix so it doesn't strobe between labels.
+        let naming = NamingRegistry(specialistSubtypes: [:], buffs: [
+            "ProductivityBuffLvl3":   "Aunt Irma's Basket",
+            "ProductivityBuffLvl300": "Aunt Irma's Feast",
+        ], buildings: [:])
+        let buffs = BuffsStore(naming: naming)
+        buffs.apply(InboundMessage.BuffsPayload(items: [
+            .init(uid1: 100, uid2: 200, buffName: "ProductivityBuffLvl3",
+                  resourceName: "", amount: 10, insertedAt: 0),
+            .init(uid1: 300, uid2: 400, buffName: "ProductivityBuffLvl300",
+                  resourceName: "", amount: 10, insertedAt: 0),
+        ]))
+        let buildings = BuildingsStore()
+        buildings.apply(InboundMessage.BuildingsPayload(items: [
+            .init(gridIndex: 11, skin: "WoodCutter_01", uid1: 11, uid2: 0, activeBuff: nil),
+            .init(gridIndex: 20, skin: "Mason_01",      uid1: 20, uid2: 0, activeBuff: nil),
+        ]))
+        let categories = BuildingCategoryRegistry(categories: [
+            BuildingCategory(displayName: "Lumber", skinBases: ["WoodCutter"], group: "Wood"),
+            BuildingCategory(displayName: "Stone",  skinBases: ["Mason"],      group: "Masons"),
+        ])
+        let coord = BuffDispatchCoordinator(
+            buffsStore: buffs,
+            buildingsStore: buildings,
+            dispatcher: CapturingDispatcher(),
+            classifier: .empty,
+            categoryRegistry: categories,
+            bulk: BulkDispatcher(interCallDelayNs: 0),
+            logger: MockLogger())
+        coord.buffBannerHideDelay = 5   // keep banner visible for assertion
+        let snapshot = coord.groups
+        coord.selectedBuff["Lumber"] = "ProductivityBuffLvl3"
+        coord.selectedBuff["Stone"]  = "ProductivityBuffLvl300"
+
+        let task = coord.buffAllGroups(snapshot: snapshot)
+        await task?.value
+
+        #expect(coord.buffBannerText?.hasPrefix("2 buildings buffed") == true)
+        #expect(coord.buffBannerText?.contains("·") == false)
+    }
+
     @Test func buffAllWithUnknownBuffIsNoOp() async {
         let buffs = BuffsStore(naming: .empty)   // empty inventory
         let buildings = makeBuildingsStore(grids: [10])

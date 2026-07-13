@@ -65,6 +65,14 @@ struct AppEnvironment {
             stores: [collectibles, specialists, buildings, buffs, publicTrades],
             logger: logger
         ))
+        // Buff panel activates on friend visits: BUILDINGS + BUFFS keep
+        // flowing so the friend's buildings + our inventory populate, but
+        // specialists and collectibles get wiped so their panels don't show
+        // stale home data. See CLAUDE.md "Zone-context gate".
+        inbound.register(ZoneContextHandler(
+            offHomeStoresToClear: [specialists, collectibles],
+            logger: logger
+        ))
         self.inbound = inbound
 
         self.buffDispatch = BuffDispatchCoordinator(

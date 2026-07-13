@@ -341,6 +341,14 @@
 
     // opcode=61 — apply a buff. action.data is a bare dUniqueID identifying the
     // buff stack; no building-type encoding needed (verified from game traffic).
+    //
+    // zoneID sourcing: prefer window._tsoCurrentZoneID (captured from the last
+    // inbound dZoneVO.zoneID) over the auth-ctx zoneID. On a friend visit the
+    // game's "visit friend" outbound carries the HOME zoneID, so auth-ctx lags
+    // — a buff dispatched right after the transition would otherwise be
+    // addressed to home. dZoneVO is authoritative for the currently-visible
+    // zone. Falls back to auth-ctx when _tsoCurrentZoneID is unset (fresh
+    // session with no zone-load observed yet).
     function dispatchBuff(opts) {
         var ctx = requireAuthCtx('[_TSORPC:buff]');
         if (!ctx) return Promise.reject(new Error('auth not ready'));
@@ -348,15 +356,19 @@
         var buffUid1 = opts.buffUid1 | 0;
         var buffUid2 = opts.buffUid2 | 0;
         var grid     = opts.targetGrid | 0;
+        var zoneID   = (typeof window._tsoCurrentZoneID === 'number' && window._tsoCurrentZoneID > 0)
+            ? window._tsoCurrentZoneID
+            : ctx.zoneID;
 
         var buffID = dUniqueID([buffUid1, buffUid2]);
         var action = dServerAction([0, grid, 0, buffID]);
-        var call   = dServerCall([61, ctx.zoneID, action, ctx.dsoAuthUser, ctx.dsoAuthToken, ctx.dsoAuthRandomClientID]);
+        var call   = dServerCall([61, zoneID, action, ctx.dsoAuthUser, ctx.dsoAuthToken, ctx.dsoAuthRandomClientID]);
         var msg    = buildRemotingMessage(ctx, call);
 
         webkit.messageHandlers.logger.postMessage(
             '[_TSORPC:buff] buffUid=' + buffUid1 + ':' + buffUid2 +
-            ' grid=' + grid + ' zone=' + ctx.zoneID);
+            ' grid=' + grid + ' zone=' + zoneID +
+            (zoneID !== ctx.zoneID ? ' (authCtx=' + ctx.zoneID + ')' : ''));
 
         return sendAMF([msg]).then(function(result) {
             webkit.messageHandlers.logger.postMessage(

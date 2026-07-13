@@ -75,6 +75,15 @@ struct BuffsPanel: View {
             }
         }
         .frame(width: 320)
+        .overlay(alignment: .top) {
+            if let text = coordinator.buffBannerText {
+                BuffDispatchBanner(text: text)
+                    .padding(.horizontal, 10)
+                    .padding(.top, 6)
+                    .transition(.move(edge: .top).combined(with: .opacity))
+            }
+        }
+        .animation(.easeInOut(duration: 0.2), value: coordinator.buffBannerText)
     }
 
     private var searchField: some View {
@@ -251,5 +260,27 @@ private struct BuildingGroupRow: View, Equatable {
             }
         }
         .padding(.vertical, 6)
+    }
+}
+
+// Transient banner shown at the top of BuffsPanel when a bulk buff dispatch
+// runs. Mirrors ExplorerDispatchBanner in SpecialistsPanel. Coalescing +
+// hide timing are managed by BuffDispatchCoordinator.
+private struct BuffDispatchBanner: View {
+    let text: String
+    var body: some View {
+        HStack(spacing: 6) {
+            Image(systemName: "sparkles")
+            Text(text).font(.caption).bold()
+        }
+        .foregroundStyle(.white)
+        .padding(.horizontal, 10)
+        .padding(.vertical, 6)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(
+            RoundedRectangle(cornerRadius: 6, style: .continuous)
+                .fill(Color.blue.opacity(0.92))
+        )
+        .shadow(color: .black.opacity(0.2), radius: 3, y: 1)
     }
 }
