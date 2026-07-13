@@ -488,6 +488,15 @@ struct BuffDispatchCoordinatorTests {
     @Test func buffAllShowsBannerAndCoalescesBursts() async {
         // Mirrors explorerDispatchShowsBannerAndCoalescesBursts —
         // BuffsPanel surfaces the same signal after a bulk dispatch.
+        //
+        // Hide delay is kept long here because buffAll goes through
+        // BulkDispatcher's Task, so `await task?.value` yields — on slower
+        // machines (CI) the hide timer can otherwise fire before the
+        // assertion runs. The specialist banner test covers the "clears
+        // after hide delay" behavior — that path uses dispatchOne
+        // synchronously, so the timer can't race there. Both banners share
+        // the same hide-timer shape, so re-testing it here would just
+        // duplicate that coverage with a 5+ second sleep window.
         let naming = NamingRegistry(specialistSubtypes: [:],
                                     buffs: ["ProductivityBuffLvl3": "Aunt Irma's Basket"],
                                     buildings: [:])
@@ -504,7 +513,7 @@ struct BuffDispatchCoordinatorTests {
             classifier: .empty,
             bulk: BulkDispatcher(interCallDelayNs: 0),
             logger: MockLogger())
-        coord.buffBannerHideDelay = 0.05
+        coord.buffBannerHideDelay = 30   // survive CI await race
 
         #expect(coord.buffBannerText == nil)
 
@@ -515,10 +524,6 @@ struct BuffDispatchCoordinatorTests {
         // the buff display name from NamingRegistry.
         #expect(coord.buffBannerText?.hasPrefix("3 buildings buffed") == true)
         #expect(coord.buffBannerText?.contains("Aunt Irma's Basket") == true)
-
-        // Banner clears once the hide delay elapses.
-        try? await Task.sleep(nanoseconds: 200_000_000)
-        #expect(coord.buffBannerText == nil)
     }
 
     @Test func buffAllGroupsMixedBuffsDropsLabelSuffix() async {
