@@ -15,7 +15,7 @@ A native macOS wrapper around The Settlers Online (TSO), built as an automation 
 - **Collectible Highlighter** — texture substitution renders all 55 collectible types pink in-world.
 - **Specialist Dispatch** — manual one-shot dispatch + per-kind bulk dispatch + per-row optimistic UI flip. AMF3 RPC reaches GameServer end-to-end.
 - **Specialist Auto-Loop** — Explorer loop (per-uid wake-up timer driven by predicted duration) and per-subtype Geologist loops (Stone Cold / Diligent), persisted across launches via `UserDefaults`.
-- **Buff Manager** — buff inventory + buildings panel grouped by category (Mines / Masons / Smelters / Wood / Food / Other), per-group buff selection, master "Buff all" override.
+- **Buff Manager** — buff inventory + buildings panel grouped by category (Mines / Masons / Smelters / Wood / Food / Other), per-group buff selection, master "Buff all" override. Works on friend visits too — the panel repopulates with the friend's buildings and the outbound RPC carries the friend's `zoneID` (see "Zone-context gate" below).
 - **Player buff auto-detection** — Prestigious Friend Buff (PFB, ×0.8 task time) detected from `dZoneVO.zoneBuffs` and folded into every duration estimate.
 - **Idle sleep inhibitor** — keeps the app awake while auto-loops run (`ProcessInfo.beginActivity`).
 
@@ -65,6 +65,7 @@ TSOClient/                      ← Xcode project root
       BuffsHandler.swift
       PlayerBuffsHandler.swift      ← PFB auto-detection sink
       GameStateHandler.swift        ← LOADED/ZONE_CHANGED/ZONE_LEFT; clears ZoneLifecycle conformers
+      ZoneContextHandler.swift      ← ZONE_CONTEXT (home|friend|adventure); wipes specialists+collectibles off-home
       ZoneLifecycle.swift           ← protocol: stores that get wiped on ZONE_LEFT
       WireCommand.swift             ← protocol for outbound commands (Encodable + `type`)
       OutboundMessage.swift         ← DispatchSpecialistCommand / DispatchBuffCommand structs
@@ -155,6 +156,7 @@ Injection order is dependency-ordered; everything runs at `atDocumentStart`.
 - `BUILDINGS`     — `{items:[{gridIndex,skin,uid1,uid2,activeBuff?}]}`
 - `BUFFS`         — `{items:[{uid1,uid2,buffName,resourceName,amount,insertedAt}]}`
 - `PLAYER_BUFFS`  — `{pfbActive: bool}` (auto-detected from `dZoneVO.zoneBuffs`)
+- `ZONE_CONTEXT`  — `{context: "home"|"friend"|"adventure", zoneId?}` (emitted on every context transition; `ZoneContextHandler` wipes `SpecialistsStore` + `CollectiblesStore` when `context != "home"` so the buff panel can operate on friend-zone buildings without a stale specialist snapshot showing dispatch buttons)
 
 **Swift → JS (`BridgeSender.send(_ command:)`):**
 - `DISPATCH_SPECIALIST` — `{uid1, uid2, actionType, taskCode, targetGrid}` → handled by `amf3-encoder.js`
@@ -268,6 +270,12 @@ GameServer realm: `https://r03-gs003.thesettlersonline.com/GameServer/amf` (snif
 - `BridgeSender` does NOT hold a `WKWebView`. It depends on `JSExecutor`; the concrete `WKWebViewJSExecutor` is created in `AppEnvironment` and the actual `WKWebView` is late-bound inside `WebView.makeNSView` (so the sender exists before the view does).
 - Coordinators depend on **ports** (`SpecialistDispatchPort`, `BuffDispatchPort`), the learner exposes a **lookup** (`SpecialistDurationLookup`), the handler sees a **runner** (`SpecialistsAutoLoopRunner`), and the row's countdown reads through a **`DurationEstimator`**. These narrow seams exist so a unit test can swap a fake at the relevant boundary without spinning up the whole environment.
 - Resource registries (`NamingRegistry`, `BuildingCategoryRegistry`, `BuffCategoryClassifier`, `ExplorerDurationRegistry`) load via `ResourceLoader`. Missing JSON files log and fall back to empty — production callers use the `.default` static.
+- **Zone-context gate** (`amf3-scanner.js`): every payload is classified as `home | friend | adventure` from `dZoneVO.{zoneOwner, zoneVisitor}PlayerID + adventureName`. Context is sticky across incremental payloads (no dZoneVO ⇒ reuse the last known context). Emission rules by context:
+  - **home**: full extraction (unchanged).
+  - **friend**: `BUILDINGS`, `BUFFS`, `PLAYER_BUFFS` still emitted so the buff panel targets the friend's buildings with our inventory; `COLLECTIBLES` and `SPECIALISTS` suppressed. `BUFFS` walk filters `ctx.playerVOs` to the visitor's dPlayerVO (userID == `zoneVisitorPlayerID`) so a friend's inventory doesn't poison ours.
+  - **adventure**: pipeline frozen entirely (parity with the pre-2026-07-13 blanket !onHome gate).
+  On every transition a `ZONE_CONTEXT` message is emitted; `ZoneContextHandler` wipes `SpecialistsStore` + `CollectiblesStore` when context != `home`. That wipe also pauses auto-loop wake timers implicitly (`SpecialistDispatchCoordinator.fireReDispatch` re-reads `store.items` and bails when the uid is absent).
+- **Buff dispatch zoneID sourcing** (`amf3-encoder.js` `dispatchBuff`): opcode 61 uses `window._tsoCurrentZoneID` (captured from the last inbound `dZoneVO.zoneID`) in preference to `_tsoAuthCtx.zoneID`. The auth-ctx zoneID lags on visit-friend transitions — the game's "GoToPlayer" outbound still carries the home zoneID — so a buff sent right after entering a friend's zone would otherwise be addressed to home. Falls back to auth-ctx only when no zone-load has been observed yet (fresh session).
 
 ## Unity UI refresh dead end (reconnaissance done — do not re-investigate)
 

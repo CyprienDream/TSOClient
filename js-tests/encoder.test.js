@@ -155,6 +155,33 @@ describe('outbound RPC wire format', () => {
         expect(buffID.uniqueID2).toBe(200);
     });
 
+    it('dispatchBuff: prefers window._tsoCurrentZoneID over auth-ctx zoneID', async () => {
+        // Regression: on visit-friend, the game's "GoToPlayer" outbound
+        // carries the HOME zoneID, so _tsoAuthCtx.zoneID lags. The buff
+        // panel would otherwise dispatch to home even while the user is on
+        // the friend's zone. amf3-scanner captures dZoneVO.zoneID into
+        // _tsoCurrentZoneID; the encoder must trust it over auth-ctx.
+        sandbox.window._tsoCurrentZoneID = 9999;
+        // auth-ctx.zoneID stays at 100 (from beforeEach) — that's the "stale
+        // home" reading. If the encoder read from auth-ctx we'd send 100.
+        await sandbox.window._TSORPC.dispatchBuff({
+            buffUid1: 1, buffUid2: 2, targetGrid: 33,
+        });
+        const call = parseCapturedCall().rmsg.body[0];
+        expect(call.zoneID).toBe(9999);
+    });
+
+    it('dispatchBuff: falls back to auth-ctx zoneID when _tsoCurrentZoneID is unset', async () => {
+        // Fresh session with no zone-load observed yet — the global is
+        // undefined. Auth-ctx is the only zoneID we have, so use it.
+        expect(sandbox.window._tsoCurrentZoneID).toBeUndefined();
+        await sandbox.window._TSORPC.dispatchBuff({
+            buffUid1: 1, buffUid2: 2, targetGrid: 33,
+        });
+        const call = parseCapturedCall().rmsg.body[0];
+        expect(call.zoneID).toBe(100);   // from beforeEach _tsoAuthCtx.zoneID
+    });
+
     it('dispatchTrade: dServerCall.type=1049, call.data is dTradeOfferVO directly (no dServerAction wrapper)', async () => {
         await sandbox.window._TSORPC.dispatchTrade({
             receipientId:   8888,

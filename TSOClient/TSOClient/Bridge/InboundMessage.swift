@@ -23,6 +23,16 @@ enum InboundMessage {
         let zoneId: Int?
     }
 
+    // Emitted by amf3-scanner on every context transition (home ↔ friend ↔
+    // adventure). Handled by ZoneContextHandler, which wipes SpecialistsStore
+    // + CollectiblesStore when context flips off 'home' so the buff panel can
+    // safely operate on friend-zone buildings without a stale specialist
+    // snapshot showing dispatch buttons that would misfire.
+    struct ZoneContextPayload: Decodable {
+        let context: String   // "home" | "friend" | "adventure"
+        let zoneId: Int?
+    }
+
     struct BuildingsPayload: Decodable {
         let items: [Item]
 

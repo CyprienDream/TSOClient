@@ -10,6 +10,16 @@ final class BuffDispatchCoordinator {
     // Master picker selection; setting this overrides every visible group.
     var masterBuff: String = ""
 
+    // Transient banner surfaced by BuffsPanel when buildings are buffed
+    // (per-category bulk or master "Buff all"). Mirrors the specialist
+    // dispatch banner — bursts within `buffBannerHideDelay` of the last
+    // dispatch coalesce into one banner.
+    private(set) var buffBannerText: String?
+    var buffBannerHideDelay: TimeInterval = 2.5
+    private var buffBannerCount: Int = 0
+    private var buffBannerLastBuff: String?
+    private var buffBannerHideTask: Task<Void, Never>?
+
     private let buffsStore: BuffsStore
     private let buildingsStore: BuildingsStore
     private let dispatcher: BuffDispatchPort
@@ -221,6 +231,37 @@ final class BuffDispatchCoordinator {
                 buffUid1: buff.uid1,
                 buffUid2: buff.uid2,
                 targetGrid: building.gridIndex)
+            noteBuffDispatched(buffLabel: buff.displayLabel)
+        }
+    }
+
+    // Coalesces rapid-fire buff dispatches (per-category or master "Buff all")
+    // into a single banner that resets after `buffBannerHideDelay` seconds of
+    // quiet. Mirrors `SpecialistDispatchCoordinator.noteExplorerDispatched`.
+    // Shows the buff display name when a burst is homogenous; drops the
+    // label if the master dispatch mixes different buffs across categories,
+    // so the banner doesn't strobe.
+    private func noteBuffDispatched(buffLabel: String) {
+        buffBannerCount += 1
+        if buffBannerCount == 1 {
+            buffBannerLastBuff = buffLabel
+        } else if buffBannerLastBuff != buffLabel {
+            buffBannerLastBuff = nil   // mixed burst
+        }
+        let n = buffBannerCount
+        let labelSuffix = buffBannerLastBuff.map { " · \($0)" } ?? ""
+        buffBannerText = n == 1
+            ? "Building buffed\(labelSuffix)"
+            : "\(n) buildings buffed\(labelSuffix)"
+        buffBannerHideTask?.cancel()
+        let delay = buffBannerHideDelay
+        buffBannerHideTask = Task { @MainActor [weak self] in
+            try? await Task.sleep(nanoseconds: UInt64(max(0, delay) * 1_000_000_000))
+            if Task.isCancelled { return }
+            guard let self else { return }
+            self.buffBannerText = nil
+            self.buffBannerCount = 0
+            self.buffBannerLastBuff = nil
         }
     }
 
@@ -250,6 +291,7 @@ final class BuffDispatchCoordinator {
                 buffUid1: step.buff.uid1,
                 buffUid2: step.buff.uid2,
                 targetGrid: step.building.gridIndex)
+            noteBuffDispatched(buffLabel: step.buff.displayLabel)
         }
     }
 }

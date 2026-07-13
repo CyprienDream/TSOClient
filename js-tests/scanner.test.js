@@ -55,7 +55,7 @@ function buildScannerSandbox() {
 // ── VO builders ─────────────────────────────────────────────────────────────
 const FQN = (cls) => 'defaultGame.Communication.VO.' + cls;
 
-function zoneVO({ owner, visitor, adventureName = null, mapWidth = 89, mapHeight = 196 }) {
+function zoneVO({ owner, visitor, adventureName = null, mapWidth = 89, mapHeight = 196, zoneID = null }) {
     return {
         __class: FQN('dZoneVO'),
         mapWidth,
@@ -63,6 +63,7 @@ function zoneVO({ owner, visitor, adventureName = null, mapWidth = 89, mapHeight
         zoneOwnerPlayerID:   owner,
         zoneVisitorPlayerID: visitor,
         adventureName,
+        zoneID,
     };
 }
 
@@ -231,5 +232,80 @@ describe('amf3-scanner home-zone gate', () => {
         // and rejects it.
         s.analyze(envelope(zoneVO({ owner: 2, visitor: 1 }), specVO({})));   // friend
         expect(s.specialistsCount()).toBe(1);
+    });
+
+    // ── Friend-zone buff panel activation ────────────────────────────────
+    // The buff panel must keep working while visiting a friend so the user
+    // can buff the friend's buildings. That means BUILDINGS still flow on
+    // friend zones, and a ZONE_CONTEXT emit tells Swift to blank the
+    // specialists panel (which would otherwise be a stale home snapshot
+    // with dispatch buttons pointing at the wrong zoneID).
+
+    function contextEmits(s) {
+        return s.sends.filter((e) => e.type === 'ZONE_CONTEXT');
+    }
+    function buildingsEmits(s) {
+        return s.sends.filter((e) => e.type === 'BUILDINGS');
+    }
+
+    it('emits ZONE_CONTEXT on the initial home zone-load', () => {
+        const s = buildScannerSandbox();
+        s.analyze(envelope(zoneVO({ owner: 1, visitor: 1, zoneID: 42 }), specVO({})));
+        const ctx = contextEmits(s);
+        expect(ctx).toHaveLength(1);
+        expect(ctx[0].payload).toEqual({ context: 'home', zoneId: 42 });
+    });
+
+    it('emits ZONE_CONTEXT with context=friend on home→friend transition', () => {
+        const s = buildScannerSandbox();
+        s.analyze(envelope(zoneVO({ owner: 1, visitor: 1, zoneID: 42 }), specVO({})));
+        s.analyze(envelope(zoneVO({ owner: 2, visitor: 1, zoneID: 88 }), specVO({})));
+        const ctx = contextEmits(s);
+        expect(ctx).toHaveLength(2);
+        expect(ctx[1].payload).toEqual({ context: 'friend', zoneId: 88 });
+    });
+
+    it('emits ZONE_CONTEXT with context=adventure when adventureName is set', () => {
+        const s = buildScannerSandbox();
+        s.analyze(envelope(zoneVO({ owner: 1, visitor: 1, zoneID: 42 }), specVO({})));
+        s.analyze(envelope(
+            zoneVO({ owner: 1, visitor: 1, zoneID: 500, adventureName: 'TheBlackKnights' }),
+            specVO({})
+        ));
+        const ctx = contextEmits(s);
+        expect(ctx).toHaveLength(2);
+        expect(ctx[1].payload.context).toBe('adventure');
+    });
+
+    it('does not re-emit ZONE_CONTEXT when the context is unchanged across payloads', () => {
+        // Home zone-loads happen on every reload; the wipe signal should only
+        // fire on actual transitions, not every heartbeat.
+        const s = buildScannerSandbox();
+        s.analyze(envelope(zoneVO({ owner: 1, visitor: 1 }), specVO({})));
+        s.analyze(envelope(zoneVO({ owner: 1, visitor: 1 }), specVO({ uid1: 3, uid2: 4 })));
+        s.analyze(envelope(zoneVO({ owner: 1, visitor: 1 }), specVO({ uid1: 5, uid2: 6 })));
+        expect(contextEmits(s)).toHaveLength(1);
+    });
+
+    it('emits BUILDINGS on a friend zone-load — buff panel needs the friend\'s buildings', () => {
+        // Before the 2026-07-13 fix, the blanket !onHome return blocked every
+        // downstream emission. The buff panel would go blank on friend visits
+        // even though our own buff inventory is dispatchable there.
+        const s = buildScannerSandbox();
+        s.analyze(envelope(
+            zoneVO({ owner: 2, visitor: 1, mapWidth: 89, mapHeight: 196 }),
+            buildingVO({ grid: 100 })
+        ));
+        const b = buildingsEmits(s);
+        expect(b).toHaveLength(1);
+        expect(b[0].payload.items[0].gridIndex).toBe(100);
+    });
+
+    it('captures dZoneVO.zoneID into window._tsoCurrentZoneID', () => {
+        // dispatchBuff prefers this global over the auth-ctx zoneID so buffs
+        // land in the currently-visible zone rather than a stale home zoneID.
+        const s = buildScannerSandbox();
+        s.analyze(envelope(zoneVO({ owner: 2, visitor: 1, zoneID: 8888 })));
+        expect(s.sandbox.window._tsoCurrentZoneID).toBe(8888);
     });
 });

@@ -165,12 +165,15 @@
                 ctx.playerVOs.push(v);
             }
             // dZoneVO ownership + identity — independent signal that doesn't
-            // depend on guessing which dPlayerVO is "ours".
+            // depend on guessing which dPlayerVO is "ours". Also capture
+            // dZoneVO.zoneID so buff RPCs can address the currently-visible
+            // zone (auth-ctx zoneID lags on visit-friend transitions).
             if (shortCls === 'dZoneVO') {
                 if (typeof v.zoneOwnerPlayerID   === 'number') ctx.zoneOwnerPlayerID   = v.zoneOwnerPlayerID;
                 if (typeof v.zoneVisitorPlayerID === 'number') ctx.zoneVisitorPlayerID = v.zoneVisitorPlayerID;
                 if (typeof v.gameWorldName === 'string') ctx.gameWorldName = v.gameWorldName;
                 if (typeof v.adventureName === 'string') ctx.adventureName = v.adventureName;
+                if (typeof v.zoneID === 'number' && v.zoneID > 0) ctx.currentZoneID = v.zoneID;
             }
             if (isCollectibleBuilding(v)) {
                 ctx.items.push(v);
@@ -258,6 +261,8 @@
             zoneVisitorPlayerID: null,
             gameWorldName: null,
             adventureName: null,
+            currentZoneID: null, // dZoneVO.zoneID of the currently-visible zone
+
             treePfbHits:  [],    // VOs in the tree whose buffName_string names PFB
             resourceNames: {},   // { name_string: true } — set of wire-confirmed
                                  // resource names harvested this response
@@ -397,27 +402,48 @@
     var _prevCollectibles = null;  // null until first zone-load; {gridIndex→item} thereafter
     var _lastZoneKey = undefined;  // (zoneOwnerPlayerID, zoneVisitorPlayerID) tuple — transition key
 
-    // ── Home-zone gate ──────────────────────────────────────────────────
-    // Features (panel updates, auto-loop) only run on the local player's
-    // own non-adventure zone. The signal we trust is dZoneVO.{zoneOwner,
-    // zoneVisitor}PlayerID: home ⇔ owner == visitor && no adventureName.
+    // ── Zone-context gate ───────────────────────────────────────────────
+    // Zone context is one of 'home' | 'friend' | 'adventure', derived from
+    // dZoneVO.{zoneOwner, zoneVisitor}PlayerID + adventureName:
+    //   home      ⇔ owner == visitor && !adventureName
+    //   friend    ⇔ owner != visitor && !adventureName
+    //   adventure ⇔ adventureName set
+    //
     // We do NOT gate on the auth-ctx zoneID — when the game issues a
     // "visit friend" outbound, that request carries the home zoneID, so
     // auth-ctx still reads home when the friend-zone inbound lands and
     // the gate would falsely admit friend data.
     //
     // Sticky across payloads: incremental updates between zone-loads
-    // don't carry dZoneVO, so we reuse the last observed on-home state.
-    // Default true so the first home zone-load (which sets the bool
+    // don't carry dZoneVO, so we reuse the last observed context.
+    // Default 'home' so the first home zone-load (which sets the value
     // explicitly) isn't preceded by a dropped no-zone payload.
-    var _isOnHome = true;
+    //
+    // Feature gating by context:
+    //   home      → full extraction (unchanged behavior)
+    //   friend    → BUILDINGS/BUFFS/PLAYER_BUFFS emitted so the buff panel
+    //               can target the friend's buildings; COLLECTIBLES and
+    //               SPECIALISTS suppressed (they don't apply). A
+    //               ZONE_CONTEXT bridge message is emitted on transitions
+    //               so Swift can wipe the specialists + collectibles
+    //               stores, which also pauses auto-loop timers (fireReDispatch
+    //               no-ops when the uid isn't in store.items).
+    //   adventure → freeze everything (parity with old !onHome behavior).
+    var _zoneContext = 'home';
 
-    function isOnHome(ctx) {
+    function currentZoneContext(ctx) {
         if (ctx.zoneOwnerPlayerID !== null && ctx.zoneVisitorPlayerID !== null) {
-            _isOnHome = (ctx.zoneOwnerPlayerID === ctx.zoneVisitorPlayerID) &&
-                        !ctx.adventureName;
+            if (ctx.adventureName) {
+                _zoneContext = 'adventure';
+            } else if (ctx.zoneOwnerPlayerID === ctx.zoneVisitorPlayerID) {
+                _zoneContext = 'home';
+            } else {
+                _zoneContext = 'friend';
+            }
+        } else if (ctx.adventureName) {
+            _zoneContext = 'adventure';
         }
-        return _isOnHome;
+        return _zoneContext;
     }
 
     function buildResult(ctx) {
@@ -737,15 +763,36 @@
             }
         }
 
-        var onHome = isOnHome(ctx);
-        window._tsoOnHome = onHome;
-        if (!onHome) return;  // freeze panel + suppress auto-loop while away
+        var context = currentZoneContext(ctx);
+        window._tsoZoneContext = context;
+        window._tsoOnHome = (context === 'home');
+        if (typeof ctx.currentZoneID === 'number' && ctx.currentZoneID > 0) {
+            window._tsoCurrentZoneID = ctx.currentZoneID;
+        }
+
+        // Emit ZONE_CONTEXT on any transition — Swift wipes SpecialistsStore
+        // and CollectiblesStore when context flips off 'home', which also
+        // pauses auto-loop wake timers (fireReDispatch bails when the uid
+        // isn't in store.items).
+        if (context !== window._tsoLastEmittedContext) {
+            window._tsoLastEmittedContext = context;
+            window._tsoSend('ZONE_CONTEXT', {
+                context: context,
+                zoneId:  (typeof ctx.currentZoneID === 'number') ? ctx.currentZoneID : null,
+            });
+        }
+
+        // Adventure zones freeze the pipeline entirely — no buffs, no
+        // collectibles, no specialist updates. Buff panel activation is
+        // limited to friend visits by design.
+        if (context === 'adventure') return;
 
         // ── DestructBuildingResultVO: pickup with no full building list ────────
         // If the server sends only a destruct event (no updated building array),
         // handle it here and return — do NOT call setCollectibles([]) which would
-        // clear the overlay markers.
-        if (ctx.destructed.length > 0 && ctx.allBuildings.length === 0) {
+        // clear the overlay markers. Pickups are a home-zone concern (collectibles
+        // spawn on the player's own island).
+        if (context === 'home' && ctx.destructed.length > 0 && ctx.allBuildings.length === 0) {
             var d0 = ctx.destructed[0];
 
             // Try to extract a grid position from the VO or one level of nested objects.
@@ -776,11 +823,17 @@
 
         var result = buildResult(ctx);
 
-        window._tsoSend('COLLECTIBLES', {
-            mapWidth:  result.mapWidth,
-            mapHeight: result.mapHeight,
-            items:     result.items,
-        });
+        // Collectibles are our own island's spawn state — don't publish
+        // friend-zone data here (Swift wiped the store on the ZONE_CONTEXT
+        // transition, and the highlighter's texture-substitution runs
+        // independent of this emit).
+        if (context === 'home') {
+            window._tsoSend('COLLECTIBLES', {
+                mapWidth:  result.mapWidth,
+                mapHeight: result.mapHeight,
+                items:     result.items,
+            });
+        }
 
         // Persist captured clock/player level even if no specialists in this response.
         if (typeof ctx.serverClock === 'number') {
@@ -791,7 +844,12 @@
         }
 
         // ── Specialist extraction ─────────────────────────────────────────
-        if (ctx.specialists.length > 0) {
+        // Specialists live on the local player's island. Friend-zone
+        // responses may echo specialist VOs, but dispatching them there
+        // makes no sense (they'd target the friend's zone). Skip emit
+        // off-home; the Swift store was wiped on the ZONE_CONTEXT flip so
+        // the panel already reads empty.
+        if (context === 'home' && ctx.specialists.length > 0) {
             var specItems = [];
             for (var si = 0; si < ctx.specialists.length; si++) {
                 var sp = ctx.specialists[si];
@@ -972,9 +1030,16 @@
 
         // ── Buff inventory extraction ─────────────────────────────────────────
         // availableBuffs_vector lives on dPlayerVO. Emit BUFFS bridge message and
-        // log a sample whenever the inventory is non-empty.
+        // log a sample whenever the inventory is non-empty. On friend zones the
+        // response may include both our own dPlayerVO and the friend's; we want
+        // strictly our inventory (the friend's UIDs would fail server-side if
+        // dispatched). Identify us by userID == zoneVisitorPlayerID.
         for (var pi = 0; pi < ctx.playerVOs.length; pi++) {
             var pvo = ctx.playerVOs[pi];
+            if (context === 'friend' &&
+                typeof ctx.zoneVisitorPlayerID === 'number' &&
+                typeof pvo.userID === 'number' &&
+                pvo.userID !== ctx.zoneVisitorPlayerID) continue;
             var buffList = unwrapCollection(pvo.availableBuffs_vector);
             if (buffList.length === 0) continue;
             var buffItems = [];
@@ -1037,10 +1102,14 @@
             window._tsoSend('PLAYER_BUFFS', { pfbActive: scan.pfbActive });
         }
 
-        // Track current collectible set so DestructBuildingResultVO can remove the right entry.
-        var currentSet = {};
-        result.items.forEach(function(it) { currentSet[it.gridIndex] = it; });
-        _prevCollectibles = currentSet;
+        // Track current collectible set so DestructBuildingResultVO can remove
+        // the right entry. Home-only — friend-zone buildings aren't our
+        // collectibles and would poison the pickup diff.
+        if (context === 'home') {
+            var currentSet = {};
+            result.items.forEach(function(it) { currentSet[it.gridIndex] = it; });
+            _prevCollectibles = currentSet;
+        }
     }
 
     window._tsoScanner = {
