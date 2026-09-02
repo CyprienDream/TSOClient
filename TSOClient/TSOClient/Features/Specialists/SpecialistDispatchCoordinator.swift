@@ -26,7 +26,7 @@ final class SpecialistDispatchCoordinator {
                 lastAutoLoopTask = runAutoExplorerLoop()
             }
             if !autoExplorerLoopEnabled, oldValue {
-                cancelAllPendingReDispatches()
+                cancelPendingReDispatches(strategyId: "auto-loop-explorer")
             }
         }
     }
@@ -38,6 +38,10 @@ final class SpecialistDispatchCoordinator {
     var autoReDispatchBuffer: TimeInterval = 8
     private(set) var lastAutoLoopTask: Task<Void, Never>?
     private(set) var pendingReDispatches: [String: Task<Void, Never>] = [:]
+    // Parallel to pendingReDispatches, keyed by the same uid. Lets us cancel
+    // only the timers a given strategy owns (e.g. toggling the explorer loop
+    // off must not cancel geologist timers, and vice versa).
+    private var pendingReDispatchStrategies: [String: String] = [:]
 
     // Transient banner surfaced by SpecialistsPanel when explorers are
     // dispatched (manual row, bulk, or auto-loop). Bursts within
@@ -49,8 +53,10 @@ final class SpecialistDispatchCoordinator {
 
     // Geologist auto-loops, keyed by subTypeId. Each enabled entry sweeps its
     // own subtype on its own task — so Stone Cold can loop Granite while
-    // Diligent loops Gold. Zone-refresh-only (no per-uid timer) — geologist
-    // task durations aren't reliable enough yet to predict completion.
+    // Diligent loops Gold. Each dispatch arms a per-uid wake timer at
+    // `estimator.estimate + autoReDispatchBuffer` (or the learner's observed
+    // duration when the registry has no timeBonus for the subtype) so the
+    // loop re-fires mid-session without waiting for a zone reload.
     struct GeologistLoopState: Equatable {
         var enabled: Bool = false
         var task: GeologistTask = .findStone
@@ -70,6 +76,9 @@ final class SpecialistDispatchCoordinator {
         defaults.set(enabled, forKey: Keys.geologistLoopEnabled(subTypeId: subTypeId))
         if enabled, !was {
             lastGeologistLoopTasks[subTypeId] = runAutoGeologistLoop(subTypeId: subTypeId)
+        }
+        if !enabled, was {
+            cancelPendingReDispatches(strategyId: "auto-loop-geologist-\(subTypeId)")
         }
     }
 
@@ -143,7 +152,10 @@ final class SpecialistDispatchCoordinator {
             let strategy = GeologistAutoLoopStrategy(
                 subTypeId:    sub.subTypeId,
                 getState:     { [weak self] in self?.geologistLoopState(subTypeId: sub.subTypeId) ?? GeologistLoopState() },
-                subtypeLabel: sub.label
+                subtypeLabel: sub.label,
+                estimator:    estimator,
+                learned:      { [weak self] in self?.store.learner },
+                buffer:       { [weak self] in self?.autoReDispatchBuffer ?? 8 }
             )
             register(strategy)
         }
@@ -239,6 +251,7 @@ final class SpecialistDispatchCoordinator {
         guard let (strategyId, delaySec) = claim else { return }
         pendingReDispatches[spec.id]?.cancel()
         let uid = spec.id
+        pendingReDispatchStrategies[uid] = strategyId
         pendingReDispatches[uid] = Task { @MainActor [weak self] in
             try? await Task.sleep(nanoseconds: UInt64(max(0, delaySec) * 1_000_000_000))
             if Task.isCancelled { return }
@@ -251,6 +264,7 @@ final class SpecialistDispatchCoordinator {
     // this directly — it runs from the per-uid timer scheduled above.
     func fireReDispatch(uid: String, strategyId: String) {
         pendingReDispatches.removeValue(forKey: uid)
+        pendingReDispatchStrategies.removeValue(forKey: uid)
         // At wake, re-check enabled/kind/skill but not isIdle (server-side
         // state may not have flipped yet).
         guard let strategy = strategies[strategyId],
@@ -262,9 +276,16 @@ final class SpecialistDispatchCoordinator {
         dispatchOne(spec: current, taskCode: next, targetGrid: 0, bypassIdleGuard: true)
     }
 
-    private func cancelAllPendingReDispatches() {
-        for (_, t) in pendingReDispatches { t.cancel() }
-        pendingReDispatches.removeAll()
+    // Cancel only the timers owned by the given strategy id. Used by the
+    // per-strategy toggle didSets so disabling the explorer loop doesn't
+    // stomp geologist timers (and vice versa).
+    private func cancelPendingReDispatches(strategyId: String) {
+        let uids = pendingReDispatchStrategies.filter { $0.value == strategyId }.map(\.key)
+        for uid in uids {
+            pendingReDispatches[uid]?.cancel()
+            pendingReDispatches.removeValue(forKey: uid)
+            pendingReDispatchStrategies.removeValue(forKey: uid)
+        }
     }
 
     // Auto-loop entry point. Called from SpecialistsHandler after a fresh
@@ -276,8 +297,9 @@ final class SpecialistDispatchCoordinator {
     }
 
     // Geologist counterpart. Fires every registered per-subtype geologist
-    // strategy. No per-uid timer — the strategies' reDispatchDelay returns
-    // nil — so the loop relies on the next SPECIALISTS payload to re-fire.
+    // strategy. Each dispatched geologist gets a per-uid wake timer at
+    // registry-estimated (or learned) duration + `autoReDispatchBuffer` — so
+    // the loop keeps running mid-session without waiting for a zone reload.
     func runAutoGeologistLoop() {
         for sub in GeologistAutoLoopSubtype.supported {
             if let t = runAutoGeologistLoop(subTypeId: sub.subTypeId) {

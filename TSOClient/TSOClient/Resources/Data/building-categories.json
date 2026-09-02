@@ -7,7 +7,8 @@
   { "displayName": "Iron Mine",                         "skinBases": ["IronMine"],                               "group": "Mines" },
   { "displayName": "Gold Mine",                         "skinBases": ["GoldMine"],                               "group": "Mines" },
   { "displayName": "Epic Coal Mine",                    "skinBases": ["EpicCoalMine"],                           "group": "Mines" },
-  { "displayName": "Titanium Mine",                     "skinBases": ["TitaniumMine"],                            "group": "Mines" },
+  { "displayName": "Titanium Mine",                     "skinBases": ["TitaniumMine"],                           "group": "Mines" },
+  { "displayName": "Salpetre Mine",                     "skinBases": ["SalpeterMine"],                           "group": "Mines" },
 
   { "displayName": "Copper Smelter",                    "skinBases": ["BronzeSmelter"],                          "group": "Smelters" },
   { "displayName": "Iron Smelter",                      "skinBases": ["IronSmelter"],                            "group": "Smelters" },

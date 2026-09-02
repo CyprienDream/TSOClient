@@ -76,13 +76,27 @@ struct ExplorerAutoLoopStrategy: AutoLoopStrategy {
     }
 }
 
-// Geologist loop for a single subtype (Stone Cold, Diligent, …). No per-uid
-// timer — geologist task durations aren't reliable enough to predict
-// completion, so the loop relies on the next SPECIALISTS payload to re-fire.
+// Geologist loop for a single subtype (Stone Cold, Diligent, …). Arms a
+// per-uid timer like the explorer strategy — the game doesn't emit a
+// SPECIALISTS payload when a geologist finishes, so waiting on that would
+// stall the loop until the next zone reload. Duration comes from
+// `GeologistDurationRegistry` when the subtype's bonus is known
+// (Stone Cold); when it isn't (Diligent, Titanic — timeBonus=null in the
+// JSON), it falls back to the observed `learned` duration for
+// `subTypeId:actionType:subTaskID`. Both paths add `buffer()` slack so the
+// server has time to flip the spec to idle. If neither path produces a
+// duration (fresh account, never run this task before), the timer stays
+// unarmed and the loop reverts to zone-reload re-fires until the learner
+// observes one complete cycle.
 struct GeologistAutoLoopStrategy: AutoLoopStrategy {
     let subTypeId: Int
     let getState: () -> SpecialistDispatchCoordinator.GeologistLoopState
     let subtypeLabel: String
+    let estimator: DurationEstimator
+    // Narrow read window over SpecialistDurationLearner. Optional so tests
+    // without a learner can still register the strategy.
+    let learned: () -> SpecialistDurationLookup?
+    let buffer: () -> TimeInterval
 
     var id: String { "auto-loop-geologist-\(subTypeId)" }
     var logLabel: String { "\(subtypeLabel) geologist" }
@@ -100,5 +114,19 @@ struct GeologistAutoLoopStrategy: AutoLoopStrategy {
 
     func reDispatchDelay(for spec: SpecialistItem,
                          taskCode: TaskCode,
-                         pfbActive: Bool) -> TimeInterval? { nil }
+                         pfbActive: Bool) -> TimeInterval? {
+        let state = getState()
+        guard state.enabled,
+              spec.specialistType == .geologist,
+              spec.subTypeId == subTypeId else { return nil }
+        if let est = estimator.estimate(task: taskCode, subTypeId: spec.subTypeId,
+                                        skills: spec.skills, pfbActive: pfbActive) {
+            return est + buffer()
+        }
+        let key = "\(spec.subTypeId):\(taskCode.actionType):\(taskCode.subTaskID)"
+        if let learnedMs = learned()?.learnedDurationMs(forKey: key) {
+            return Double(learnedMs) / 1000.0 + buffer()
+        }
+        return nil
+    }
 }

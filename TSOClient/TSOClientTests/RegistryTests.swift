@@ -225,11 +225,12 @@ struct GeologistDurationRegistryTests {
     }
 
     @Test func nullTimeBonusReturnsNilAndEstimateSkips() {
-        // Diligent (59) has null bonus → unknown → no estimate.
+        // Lovely (40) still has null bonus → unknown → no estimate.
+        // (Diligent 59 / Chummy 62 / Titanic 98 are pinned as of 2026-08-14.)
         let code = TaskCode(actionType: 0, subTaskID: 4)
-        #expect(GeologistDurationRegistry.timeBonus(subTypeId: 59, task: code) == nil)
+        #expect(GeologistDurationRegistry.timeBonus(subTypeId: 40, task: code) == nil)
         #expect(GeologistDurationRegistry.estimate(
-            task: code, subTypeId: 59, skills: [], pfbActive: false) == nil)
+            task: code, subTypeId: 40, skills: [], pfbActive: false) == nil)
     }
 
     @Test func mineralsSkillScopeAppliesOnlyToMineralTasks() {

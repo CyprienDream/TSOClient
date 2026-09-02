@@ -7,6 +7,8 @@
     "Copper Mine":                 "Aunt Irma's Feast",
     "Iron Mine":                   "Aunt Irma's Feast",
     "Gold Mine":                   "Aunt Irma's Feast",
+    "Titanium Mine":               "Aunt Irma's Feast",
+    "Salpeter Mine":               "Aunt Irma's Feast",
     "Epic Coal Mine":              "Aunt Irma's Feast",
 
     "Copper Smelter":              "Aunt Irma's Feast",
@@ -14,7 +16,7 @@
     "Gold Smelter":                "Aunt Irma's Feast",
     "Platinum Smelter":            "Aunt Irma's Feast",
     "Steel Smelter":               "Aunt Irma's Feast",
-    "Titanium Smelter":            "",
+    "Titanium Smelter":            "Aunt Irma's Feast",
 
     "Pinewood Cutter":             "",
     "Hardwood Cutter":             "",
@@ -66,7 +68,7 @@
     "Elite Barracks":              "",
 
     "Bronze Weaponsmith":          "",
-    "Improved Bronze Weaponsmith": "",
+    "Improved Bronze Weaponsmith": "Aunt Irma's Feast",
     "Iron Weaponsmith":            "",
     "Steel Weaponsmith":           "",
     "Titanium Weaponsmith":        "",
@@ -75,12 +77,12 @@
     "Cannon Forge":                "",
     "Carpenter":                   "",
     "Crossbowsmith":               "",
-    "Foundry":                     "",
+    "Foundry":                     "Aunt Irma's Feast",
     "Longbow Maker":               "Aunt Irma's Feast",
     "Bowmaker":                    "Aunt Irma's Feast",
     "Saddle Maker":                "Aunt Irma's Feast",
-    "Wagon Maker":                 "",
-    "Wheel Maker":                 "",
+    "Wagon Maker":                 "Aunt Irma's Feast",
+    "Wheel Maker":                 "Aunt Irma's Feast",
     "Weaver":                      "Aunt Irma's Feast",
 
     "Papermill Simple":            "Aunt Irma's Feast",
@@ -96,11 +98,11 @@
     "Adventure Bookbinder":        "",
 
     "Advanced Toolmaker":          "",
-    "PowderHut":                   "",
-    "Toolmaker":                   "",
+    "PowderHut":                   "Aunt Irma's Feast",
+    "Toolmaker":                   "Aunt Irma's Feast",
 
     "Homestead":                   "Aunt Irma's Feast",
-    "Rabbit Retreat":              "Aunt Irma's Feast",
+    "Rabbit Retreat":              "Heart Balloon",
     "Mountain Clan Colossus":      "Aunt Irma's Feast"
   },
   "ignored": {

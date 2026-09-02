@@ -359,7 +359,11 @@ struct SpecialistDispatchCoordinatorTests {
         #expect(diligentCmd?.actionType == 0 && diligentCmd?.subTaskID == GeologistTask.findGoldOre.rawValue)
     }
 
-    @Test func autoGeologistLoopArmsNoPerUidTimer() async {
+    @Test func autoGeologistLoopArmsPerUidTimerWhenEstimatorReturns() async {
+        // Geologist loop mirrors explorer loop: when the estimator returns a
+        // duration, `scheduleAutoReDispatch` arms a per-uid wake timer so the
+        // loop keeps running mid-session without waiting for the next
+        // SPECIALISTS payload.
         let store = SpecialistsStore()
         store.items = [makeItem(uid: "1:1", uid1: 1, uid2: 1,
                                 kind: .geologist, subTypeId: 35)]
@@ -368,11 +372,63 @@ struct SpecialistDispatchCoordinatorTests {
             bulk: BulkDispatcher(interCallDelayNs: 0),
             logger: MockLogger(),
             defaults: isolatedDefaults(),
-            estimator: FakeDurationEstimator { _, _, _ in 60 })  // wouldn't fire even if it ran
+            estimator: FakeDurationEstimator { _, _, _ in 60 })   // never fires within the test window
         coord.setGeologistLoopEnabled(true, subTypeId: 35)
         await coord.lastGeologistLoopTasks[35]?.value
 
-        #expect(coord.pendingReDispatches.isEmpty)
+        #expect(coord.pendingReDispatches["1:1"] != nil)
+    }
+
+    @Test func autoGeologistLoopFallsBackToLearnedDurationWhenEstimatorReturnsNil() async {
+        // Diligent-style subtype (subTypeId with null timeBonus in the JSON) —
+        // the registry estimator returns nil, but the learner has an observed
+        // duration from a previous busy→idle cycle. The strategy must use
+        // that as its wake delay rather than skipping timer scheduling.
+        let seededDefaults = MockKeyValueStore()
+        seededDefaults.set(["59:0:0": 45_000], forKey: "tsoLearnedDurations")
+        let learner = SpecialistDurationLearner(store: seededDefaults)
+        let store = SpecialistsStore(learner: learner)
+        store.items = [makeItem(uid: "9:9", uid1: 9, uid2: 9,
+                                kind: .geologist, subTypeId: 59)]
+        let coord = SpecialistDispatchCoordinator(
+            store: store, dispatcher: CapturingDispatcher(),
+            bulk: BulkDispatcher(interCallDelayNs: 0),
+            logger: MockLogger(),
+            defaults: isolatedDefaults(),
+            estimator: FakeDurationEstimator { _, _, _ in nil })
+        coord.setGeologistLoopTask(.findStone, subTypeId: 59)
+        coord.setGeologistLoopEnabled(true, subTypeId: 59)
+        await coord.lastGeologistLoopTasks[59]?.value
+
+        #expect(coord.pendingReDispatches["9:9"] != nil)
+    }
+
+    @Test func autoGeologistLoopDisableCancelsOnlyOwnTimers() async {
+        // Toggling the Stone Cold geologist loop off must cancel Stone Cold's
+        // timers but leave explorer timers untouched (regression guard for
+        // the earlier `cancelAllPendingReDispatches` implementation).
+        let store = SpecialistsStore()
+        store.items = [
+            makeItem(uid: "1:1", uid1: 1, uid2: 1, kind: .explorer),
+            makeItem(uid: "2:2", uid1: 2, uid2: 2, kind: .geologist, subTypeId: 35),
+        ]
+        let coord = SpecialistDispatchCoordinator(
+            store: store, dispatcher: CapturingDispatcher(),
+            bulk: BulkDispatcher(interCallDelayNs: 0),
+            logger: MockLogger(),
+            defaults: isolatedDefaults(),
+            estimator: FakeDurationEstimator { _, _, _ in 60 })
+        coord.autoExplorerLoopEnabled = true
+        await coord.lastAutoLoopTask?.value
+        coord.setGeologistLoopEnabled(true, subTypeId: 35)
+        await coord.lastGeologistLoopTasks[35]?.value
+        #expect(coord.pendingReDispatches["1:1"] != nil)
+        #expect(coord.pendingReDispatches["2:2"] != nil)
+
+        coord.setGeologistLoopEnabled(false, subTypeId: 35)
+
+        #expect(coord.pendingReDispatches["1:1"] != nil)   // explorer timer survives
+        #expect(coord.pendingReDispatches["2:2"] == nil)   // geologist timer cancelled
     }
 
     @Test func autoGeologistLoopSettingsPersistAcrossInstances() {
