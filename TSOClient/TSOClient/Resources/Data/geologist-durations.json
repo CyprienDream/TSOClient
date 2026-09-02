@@ -3,7 +3,7 @@
   "_sources": {
     "math": "mirrors fedorovvl/tso_client user_exp_time_matrix.js convention: real = base * skill_product * 100 / bonus",
     "baseDurations": "settlersonlinewiki.eu/en/guides/geologist/ — basic Geologist exploration times (timeBonus=100). Verify against learner divergence logs.",
-    "timeBonus": "tsowiki.eu/specialists/geologists/ — wiki notation translated: '+100% speed' = bonus 200, '-67% time' ≈ bonus 300, '+33% speed' ≈ bonus 133. Resource-specific subtypes use byTask. Lovely(40)/Diligent(59)/Chummy(62) not yet pinned.",
+    "timeBonus": "tsowiki.eu/specialists/geologists/ — wiki notation translated: '+100% speed' = bonus 200, '-67% time' ≈ bonus 300, '+33% speed' ≈ bonus 133, '-83% time' ≈ bonus 600 (1/6th base), '+50% time' ≈ bonus 66 (1.5x base). Resource-specific subtypes use byTask. Lovely(40) still unpinned.",
     "skills": "settlersonlinewiki.eu/en/science/science-system-geologist/ (20 skills total: 2 time-reducers, 18 drop/bonus skills)"
   },
 
@@ -32,24 +32,49 @@
     "0,8": 28800
   },
 
+  "_subtypeNames": {
+    "_doc": "Canonical subtype names (mirrors GEOLOGIST_TYPES in amf3-classifier.js). Loader ignores this block; timeBonus entries also carry _name inline so IDs are readable in-place.",
+    "2":  "Geologist (basic)",
+    "5":  "JollyGeologist",
+    "26": "ConscientiousGeologist",
+    "34": "IronWilledGeologist",
+    "35": "StoneColdGeologist",
+    "38": "VersedGeologist",
+    "40": "LovelyGeologist",
+    "42": "GoldheartedGeologist",
+    "45": "ArcheologistGeologist",
+    "49": "ThoroughGeologist",
+    "59": "DiligentGeologist",
+    "62": "ChummyGeologist",
+    "71": "SophisticatedGeologist",
+    "73": "MummifiedGeologist",
+    "76": "GingerbreadGeologist",
+    "83": "SootyGeologist",
+    "86": "BalancedGeologist",
+    "98": "TitanicGeologist"
+  },
+
   "timeBonus": {
-    "2":  100,
-    "5":  200,
-    "26": 100,
-    "34": { "default": 100, "byTask": { "0,3": 200 } },
-    "35": { "default": 100, "byTask": { "0,0": 200, "0,2": 200, "0,6": 200 } },
-    "38": 200,
-    "40": null,
-    "42": { "default": 100, "byTask": { "0,4": 200 } },
-    "45": 100,
-    "49": 300,
-    "59": null,
-    "62": null,
-    "71": 300,
-    "73": 300,
-    "76": 300,
-    "83": { "default": 100, "byTask": { "0,5": 133 } },
-    "86": 200
+    "_doc": "Per-subtype speed bonus. Loader reads only `default` / `byTask` from object entries; `_name` / `_note` fields are documentation.",
+
+    "2":  { "_name": "Geologist (basic)",       "default": 100 },
+    "5":  { "_name": "JollyGeologist",          "default": 200, "_note": "+100% speed (all tasks halved)" },
+    "26": { "_name": "ConscientiousGeologist",  "default": 100 },
+    "34": { "_name": "IronWilledGeologist",     "default": 100, "byTask": { "0,3": 200 }, "_note": "+100% speed on iron only" },
+    "35": { "_name": "StoneColdGeologist",      "default": 100, "byTask": { "0,0": 200, "0,2": 200, "0,6": 200 }, "_note": "+100% speed on stone / marble / granite" },
+    "38": { "_name": "VersedGeologist",         "default": 200, "_note": "+100% speed (all tasks halved)" },
+    "40":                                       null,
+    "42": { "_name": "GoldheartedGeologist",    "default": 100, "byTask": { "0,4": 200 }, "_note": "+100% speed on gold only" },
+    "45": { "_name": "ArcheologistGeologist",   "default": 100 },
+    "49": { "_name": "ThoroughGeologist",       "default": 300, "_note": "-67% time (all tasks at 1/3 base)" },
+    "59": { "_name": "DiligentGeologist",       "default": 100, "byTask": { "0,2": 600, "0,3": 600, "0,4": 600, "0,5": 600, "0,6": 600, "0,7": 600, "0,8": 600 }, "_note": "-83% time (1/6 base) on marble / iron / gold / coal / granite / titanium / saltpeter; stone & copper stay neutral" },
+    "62": { "_name": "ChummyGeologist",         "default": 100, "byTask": { "0,0": 200, "0,1": 200, "0,2": 200, "0,3": 200, "0,4": 66, "0,5": 66, "0,6": 66, "0,7": 66, "0,8": 66 }, "_note": "-50% time on stone / copper / marble / iron; +50% time on gold / coal / granite / titanium / saltpeter" },
+    "71": { "_name": "SophisticatedGeologist",  "default": 300, "_note": "-67% time" },
+    "73": { "_name": "MummifiedGeologist",      "default": 300, "_note": "-67% time" },
+    "76": { "_name": "GingerbreadGeologist",    "default": 300, "_note": "-67% time" },
+    "83": { "_name": "SootyGeologist",          "default": 100, "byTask": { "0,5": 133 }, "_note": "+33% speed on coal only" },
+    "86": { "_name": "BalancedGeologist",       "default": 200, "_note": "+100% speed" },
+    "98": { "_name": "TitanicGeologist",        "default": 100, "_note": "no speed bonus" }
   },
 
   "skills": [

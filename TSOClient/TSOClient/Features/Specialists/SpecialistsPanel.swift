@@ -210,8 +210,9 @@ struct SpecialistsPanel: View {
     // Per-geologist-subtype auto-loop sections. Each supported subtype
     // (Stone Cold, Diligent, …) gets its own toggle + task picker, so the
     // user can loop Stone Cold on Granite and Diligent on Gold in parallel.
-    // Zone-refresh only — no per-uid timer — because geologist task
-    // durations aren't predictable enough yet to estimate completion.
+    // Each dispatch arms a per-uid wake timer (registry estimate + buffer,
+    // falling back to the learner's observed duration for subtypes without
+    // a known timeBonus) so the loop re-fires mid-session.
     @ViewBuilder
     private var autoGeologistLoopSection: some View {
         if filter == .geologist {

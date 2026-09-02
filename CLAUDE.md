@@ -234,7 +234,7 @@ if pfbActive:  t *= 0.8                      // Prestigious Friend Buff (20% red
 ```
 Tables live in `explorer-durations.json` (loaded once via `ResourceLoader`). PFB is auto-detected by `amf3-scanner.js` from `dZoneVO.zoneBuffs` (any `dPersistedBuffApplianceVO` whose `buffID` matches the PFB family; numeric `buffID=663`=15-day variant confirmed); the detection result rides on the `PLAYER_BUFFS` message and lands in `SpecialistsStore.pfbActive`. The panel toggle is a manual override that the next inbound payload reasserts.
 
-The geologist counterpart `geologist-durations.json` is scaffolded with `timeBonus` per subtype but the base-duration table is TBD — populate by observation. Hence: **geologist auto-loops do not arm a per-uid wake-up timer** (no reliable ETA), they only re-fire on the next `SPECIALISTS` payload (zone reload or game-emitted refresh).
+The geologist counterpart `geologist-durations.json` covers base durations for every subTaskID and time-bonus for most subtypes. Diligent (59, -83% time on marble/iron/coal/gold/granite/titanium/saltpeter → bonus 600), Chummy (62, -50% on stone/copper/marble/iron → bonus 200, +50% on coal/gold/granite/titanium/saltpeter → bonus 66), and Titanic (98, no bonus → 100) are pinned. Lovely (40) remains `null` — the registry returns nil for it and the strategy falls back to the learner. Skill effects are applied for both scopes (`TendentiousGeologist` skillId=10 → minerals; `OreCollector` skillId=17 → ores; other geologist skills are drop/quality, not time). **Geologist auto-loops arm a per-uid wake-up timer** (`registry estimate + autoReDispatchBuffer` — same shape as explorers). When the registry has no bonus for the subtype, the strategy falls back to `SpecialistDurationLearner.learnedDurations` (observed duration from a prior busy→idle cycle). Only if both are missing (fresh account, unresolved subtype, no prior run) does the loop revert to zone-reload re-fires.
 
 `SpecialistDurationLearner` tracks every busy→idle transition: observed real-time duration is written to `learnedDurations[subTypeId:actionType:subTaskId]`, persisted to `UserDefaults`, and a divergence log line fires when the registry estimate disagrees by >5% (surfaces missing skill mappings / wrong `timeBonus` entries).
 
@@ -243,7 +243,7 @@ The geologist counterpart `geologist-durations.json` is scaffolded with `timeBon
 `SpecialistDispatchCoordinator` owns the auto-loop state machine. The work itself is pluggable via `AutoLoopStrategy`:
 
 - **`ExplorerAutoLoopStrategy`** — claims idle explorers when the toggle is on and they can run `autoExplorerLoopTask`. After every dispatch, arms a per-uid wake-up `Task` that fires at `estimator.estimate(...) + autoReDispatchBuffer (default 8 s)` seconds and re-dispatches the same uid. Lets the loop keep running mid-session without waiting for the next `SPECIALISTS` payload.
-- **`GeologistAutoLoopStrategy`** — one per supported subtype (`GeologistAutoLoopSubtype.supported`: Stone Cold = 35, Diligent = 59). Returns `nil` from `reDispatchDelay` so the loop only re-fires on the next inbound `SPECIALISTS` payload. Each subtype has its own toggle + task picker, so e.g. Stone Cold can loop Granite while Diligent loops Gold.
+- **`GeologistAutoLoopStrategy`** — one per supported subtype (`GeologistAutoLoopSubtype.supported`: Stone Cold = 35, Diligent = 59, Titanic = 98). Arms a per-uid wake timer just like the explorer strategy: `estimator.estimate + autoReDispatchBuffer` when the registry has a bonus for the subtype, or the learner's observed `learnedDurationMs` + buffer as a fallback for subtypes with `null` bonus (Diligent, Titanic — see "Duration estimation" above). If both are missing (fresh account) the loop reverts to zone-reload re-fires. Each subtype has its own toggle + task picker, so e.g. Stone Cold can loop Granite while Diligent loops Gold.
 
 Strategies are registered by id (`auto-loop-explorer`, `auto-loop-geologist-<subTypeId>`); `runAutoExplorerLoop()` / `runAutoGeologistLoop()` are thin facades that look the strategy up. Adding a new auto-loop kind = new conformer + register call. Toggle state is persisted via `KeyValueStore`.
 
@@ -405,7 +405,7 @@ Match the change to a row. If a row says "must," CI passes without the test but 
 ## What does NOT exist yet
 
 - **In-game UI refresh on injected dispatch** — structural Unity limitation (see "Unity UI refresh dead end"). Mitigated by optimistic UI in our own panel.
-- **Geologist task ETA / countdown** — `geologist-durations.json` base-duration table is unpopulated. Auto-loop relies on zone-reload re-fires until a duration model exists. Populate by observation.
+- **Geologist bonus for Lovely (40)** — `timeBonus` is `null` in `geologist-durations.json`. Auto-loop for Lovely falls back to the learner's observed duration. Populate by observation and cross-reference with `[GeologistDuration]` divergence logs. Diligent, Chummy, and Titanic are pinned as of 2026-08-14 — see "Duration estimation" for the bonus shape.
 - **General dispatch auto-populated `garrisonBuildingGridPos`** — value is on `dSpecialistVO` but not threaded into `SpecialistItem`; user enters grid manually.
 - **Adventure features, trading, building/production automation.**
 - **UI tests.** Unit tests exist (`TSOClientTests/`); no UI/integration target.
