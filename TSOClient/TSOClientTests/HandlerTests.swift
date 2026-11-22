@@ -46,6 +46,122 @@ struct SpecialistsHandlerTests {
     }
 }
 
+@Suite("BuildingsHandler")
+struct BuildingsHandlerTests {
+
+    @Test func applyKicksBuffSweep() throws {
+        let store = BuildingsStore()
+        let auto  = FakeBuffsAutoLoopRunner()
+        let handler = BuildingsHandler(store: store, autoLoop: auto, logger: MockLogger())
+
+        let payload: [String: Any] = [
+            "items": [
+                ["gridIndex": 10, "skin": "Mason_01", "uid1": 10, "uid2": 0, "activeBuff": NSNull()],
+            ]
+        ]
+        try handler.apply(payloadData: encode(payload))
+
+        #expect(store.items.count == 1)
+        #expect(auto.sweepCount == 1)
+    }
+
+    @Test func nilRunnerSkipsSweep() throws {
+        // AppEnvironment always wires a runner, but the optional lets tests
+        // that don't care about the sweep path construct the handler directly.
+        let store = BuildingsStore()
+        let handler = BuildingsHandler(store: store, autoLoop: nil, logger: MockLogger())
+        let payload: [String: Any] = ["items": [[String: Any]]()]
+        try handler.apply(payloadData: encode(payload))
+        #expect(store.items.isEmpty)   // just confirms nil didn't crash the apply
+    }
+}
+
+@Suite("SpecialistTaskCompletedHandler")
+struct SpecialistTaskCompletedHandlerTests {
+
+    @Test func flipsUidsToIdleAndKicksAutoLoops() throws {
+        let store = SpecialistsStore()
+        let auto  = FakeAutoLoopRunner()
+        let handler = SpecialistTaskCompletedHandler(
+            store: store, autoLoop: auto, logger: MockLogger())
+
+        store.apply(.init(items: [
+            .init(uid: "27678:0", uid1: 27678, uid2: 0,
+                  specialistType: .geologist, subTypeId: 62, subTypeName: nil,
+                  name: "Chummy", isIdle: false, skills: [],
+                  collectedTime: 12345, bonusTime: nil, taskEndTime: nil,
+                  taskActionType: 0, taskSubTaskId: 3),
+            .init(uid: "56125:0", uid1: 56125, uid2: 0,
+                  specialistType: .geologist, subTypeId: 5, subTypeName: nil,
+                  name: "Jolly", isIdle: false, skills: [],
+                  collectedTime: 999, bonusTime: nil, taskEndTime: nil,
+                  taskActionType: 0, taskSubTaskId: 3),
+        ], playerLevel: nil))
+
+        let payload: [String: Any] = [
+            "items": [
+                ["uid": "27678:0", "uid1": 27678, "uid2": 0,
+                 "kind": "geologist", "searchedFor": "IronOre",
+                 "deposits": [
+                    ["gridIndex": 7356, "resource": "IronOre", "amount": 500, "maxAmount": 500],
+                    ["gridIndex": 2078, "resource": "IronOre", "amount": 550, "maxAmount": 550],
+                 ]],
+                ["uid": "56125:0", "uid1": 56125, "uid2": 0,
+                 "kind": "geologist", "searchedFor": "IronOre",
+                 "deposits": [
+                    ["gridIndex": 8151, "resource": "IronOre", "amount": 500, "maxAmount": 500],
+                 ]],
+            ]
+        ]
+        try handler.apply(payloadData: encode(payload))
+
+        #expect(store.items[0].isIdle == true)
+        #expect(store.items[0].taskActionType == nil)
+        #expect(store.items[1].isIdle == true)
+        #expect(auto.geologistSweepCount == 1)
+        #expect(auto.explorerSweepCount == 1)
+    }
+
+    @Test func unknownUidsAreSkippedButOthersStillApply() throws {
+        let store = SpecialistsStore()
+        let auto  = FakeAutoLoopRunner()
+        let handler = SpecialistTaskCompletedHandler(
+            store: store, autoLoop: auto, logger: MockLogger())
+
+        store.apply(.init(items: [
+            .init(uid: "1:1", uid1: 1, uid2: 1,
+                  specialistType: .geologist, subTypeId: 0, subTypeName: nil,
+                  name: "", isIdle: false, skills: [],
+                  collectedTime: nil, bonusTime: nil, taskEndTime: nil,
+                  taskActionType: 0, taskSubTaskId: 0),
+        ], playerLevel: nil))
+
+        try handler.apply(payloadData: encode([
+            "items": [
+                // Unknown uid — no matching spec — should not throw.
+                ["uid": "99:99", "uid1": 99, "uid2": 99,
+                 "kind": "geologist", "searchedFor": "IronOre", "deposits": []],
+                ["uid": "1:1", "uid1": 1, "uid2": 1,
+                 "kind": "geologist", "searchedFor": "IronOre", "deposits": []],
+            ]
+        ]))
+
+        #expect(store.items[0].isIdle == true)
+    }
+
+    @Test func malformedPayloadThrowsAndSkipsSweep() {
+        let store = SpecialistsStore()
+        let auto  = FakeAutoLoopRunner()
+        let handler = SpecialistTaskCompletedHandler(
+            store: store, autoLoop: auto, logger: MockLogger())
+
+        #expect(throws: (any Error).self) {
+            try handler.apply(payloadData: Data("{malformed".utf8))
+        }
+        #expect(auto.geologistSweepCount == 0)
+    }
+}
+
 @Suite("GameStateHandler")
 struct GameStateHandlerTests {
 
@@ -179,6 +295,26 @@ struct ZoneContextHandlerTests {
         try handler.apply(payloadData: encode(["context": "home", "zoneId": 42]))
         #expect(specs.items.count == 1)
         #expect(collectibles.items.count == 1)
+    }
+
+    @Test func notifiesBuffContextOnEveryTransition() throws {
+        // Buff coordinator needs home→friend→home transitions so it can
+        // swap its per-category selection map. Unlike the wipe (which only
+        // fires off-home), the notification fires on every context.
+        final class CapturingBuffContext: BuffZoneContextSink {
+            var contexts: [String] = []
+            func setZoneContext(_ context: String) { contexts.append(context) }
+        }
+        let sink = CapturingBuffContext()
+        let handler = ZoneContextHandler(
+            offHomeStoresToClear: [],
+            buffContext: sink,
+            logger: MockLogger())
+        try handler.apply(payloadData: encode(["context": "friend",  "zoneId": 1]))
+        try handler.apply(payloadData: encode(["context": "home",    "zoneId": 2]))
+        try handler.apply(payloadData: encode(["context": "adventure","zoneId": 3]))
+
+        #expect(sink.contexts == ["friend", "home", "adventure"])
     }
 }
 

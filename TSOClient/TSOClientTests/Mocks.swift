@@ -144,3 +144,15 @@ final class FakeAutoLoopRunner: SpecialistsAutoLoopRunner {
         geologistSweepCount += 1
     }
 }
+
+// Counts calls to the BuildingsHandler's auto-loop runner. Returns nil so
+// handler tests don't have to await a bulk-dispatch pipeline just to assert
+// the sweep was requested.
+final class FakeBuffsAutoLoopRunner: BuffsAutoLoopRunner {
+    private(set) var sweepCount = 0
+
+    func runAutoBuffSweep() -> Task<Void, Never>? {
+        sweepCount += 1
+        return nil
+    }
+}

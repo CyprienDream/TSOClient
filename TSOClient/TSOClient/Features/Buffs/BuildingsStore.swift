@@ -45,6 +45,11 @@ final class BuildingsStore {
         let uid1: Int
         let uid2: Int
         let activeBuff: String? // buffName_string of first active buff, nil if unbuffed
+        // applianceMode of the active buff (nil when no buff or absent).
+        // Learner keys on (buffName, applianceMode) so same-name buffs with
+        // different server-side duration tiers don't average into each other.
+        let activeBuffApplianceMode: Int?
+        let paused: Bool        // true when production is paused in-game — buff dispatch skips
     }
 
     // All buildings whose skinBase is any of `bases`, sorted by gridIndex.
@@ -69,7 +74,9 @@ final class BuildingsStore {
                 skinBase: normalizer.base(of: $0.skin),
                 uid1: $0.uid1,
                 uid2: $0.uid2,
-                activeBuff: $0.activeBuff
+                activeBuff: $0.activeBuff,
+                activeBuffApplianceMode: $0.activeBuffApplianceMode,
+                paused: $0.paused
             )
         }
         var index: [String: [BuildingItem]] = [:]
@@ -112,6 +119,8 @@ final class BuildingsStore {
             hasher.combine(it.uid2)
             hasher.combine(it.skin)
             hasher.combine(it.activeBuff)
+            hasher.combine(it.activeBuffApplianceMode)
+            hasher.combine(it.paused)
         }
         return hasher.finalize()
     }

@@ -305,11 +305,37 @@
         if (body instanceof Blob) { body.arrayBuffer().then(function(buf) { processOutboundBuf(buf, channel); }).catch(function(){}); return; }
     }
 
+    // ── Net sniffer ─────────────────────────────────────────────────────
+    // User-toggled via Safari Web Inspector: `window._tsoNetLog = true`.
+    // Logs URL/method on dispatch and status/content-type/length on
+    // completion for every fetch + XHR, regardless of whether the scanner
+    // parses the body. Used to discover endpoints that carry data we don't
+    // see via the AMF pipeline (buff definitions, static catalogs, etc.).
+    window._tsoNetLog = false;
+    var _netReqSeq = 0;
+    function _netLog(msg) {
+        if (!window._tsoNetLog) return;
+        try { webkit.messageHandlers.logger.postMessage(msg); } catch (_) {}
+    }
+    function _netLogRequest(method, url) {
+        if (!window._tsoNetLog) return 0;
+        var id = ++_netReqSeq;
+        _netLog('[Net] → #' + id + ' ' + method + ' ' + (url || '?').slice(0, 220));
+        return id;
+    }
+    function _netLogResponse(id, status, ct, len) {
+        if (!id || !window._tsoNetLog) return;
+        _netLog('[Net] ← #' + id + ' ' + status +
+                ' ct=' + (ct || '?').slice(0, 60) +
+                ' len=' + (len == null ? '?' : len));
+    }
+
     // ── Fetch interception ──────────────────────────────────────────────
     var origFetch = window.fetch;
     window.fetch = function(input, init) {
         var url = typeof input === 'string' ? input : (input && input.url) || '';
         var isPost = init && (init.method || '').toUpperCase() === 'POST';
+        var _netId = _netLogRequest((init && init.method) || 'GET', url);
 
         if (isPost && init.body && (isCaptureUrl(url) || window._tsoDiag)) {
             var bodyRef = init.body;
@@ -350,6 +376,8 @@
 
         return origFetch.apply(this, arguments).then(function(response) {
             var ct = response.headers ? (response.headers.get('content-type') || '') : '';
+            var clen = response.headers ? response.headers.get('content-length') : null;
+            _netLogResponse(_netId, response.status, ct, clen);
             if (isChatUrl(url)) {
                 if (window._tsoDiag) {
                     response.clone().text().then(function(text) {
@@ -395,6 +423,20 @@
         this._tsoUrl = url || '';
         this._tsoMethod = (method || '').toUpperCase();
         if (url && url.includes('GameServer/amf')) window._tsoRealmUrl = url;
+        // Record the net-log request id here so send() doesn't need to repeat
+        // the URL; mount a one-shot loadend listener for the response line.
+        this._tsoNetId = _netLogRequest(this._tsoMethod, this._tsoUrl);
+        if (this._tsoNetId) {
+            var xhr = this;
+            this.addEventListener('loadend', function() {
+                var ct = '';
+                var len = null;
+                try { ct = xhr.getResponseHeader('content-type') || ''; } catch (_) {}
+                try { len = xhr.getResponseHeader('content-length'); } catch (_) {}
+                if (len == null && typeof xhr.responseText === 'string') len = xhr.responseText.length;
+                _netLogResponse(xhr._tsoNetId, xhr.status, ct, len);
+            });
+        }
         return origOpen.apply(this, arguments);
     };
     XMLHttpRequest.prototype.send = function(body) {

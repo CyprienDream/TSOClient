@@ -44,9 +44,10 @@ enum BuildingGroup: String, CaseIterable {
     case unmapped        = "Unmapped"
 
     static let allOrdered: [BuildingGroup] = [
+        .barracks, .provisionHouse, .bookbinder,
         .mines, .masons, .smelters, .wood, .food,
         .primaryResource, .coin, .coal,
-        .provisionHouse, .barracks, .weapons, .weaponTools, .science, .bookbinder,
+        .weapons, .weaponTools, .science,
         .tributes, .other, .unmapped
     ]
 

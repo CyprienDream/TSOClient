@@ -497,24 +497,235 @@ struct BuffDispatchCoordinatorTests {
         return store
     }
 
-    @Test func selectMasterBuffPropagatesToEveryGroup() {
-        let coord = BuffDispatchCoordinator(
+    @Test func autoBuffLoopTogglePersistsAcrossInstances() {
+        let kv = MockKeyValueStore()
+        let first = BuffDispatchCoordinator(
             buffsStore: BuffsStore(naming: .empty),
             buildingsStore: BuildingsStore(),
             dispatcher: CapturingDispatcher(),
             classifier: .empty,
-            logger: MockLogger())
-        let cat1 = BuildingCategory(displayName: "Lumber", skinBases: ["WoodCutter"])
-        let cat2 = BuildingCategory(displayName: "Stone",  skinBases: ["StoneMason"])
-        let snapshot: [(category: BuildingCategory, buildings: [BuildingsStore.BuildingItem])] = [
-            (cat1, []), (cat2, [])
-        ]
+            logger: MockLogger(),
+            defaults: kv)
+        #expect(first.autoBuffLoopEnabled == false)
+        first.autoBuffLoopEnabled = true
 
-        coord.selectMasterBuff("ProductivityBuffLvl3", across: snapshot)
+        let second = BuffDispatchCoordinator(
+            buffsStore: BuffsStore(naming: .empty),
+            buildingsStore: BuildingsStore(),
+            dispatcher: CapturingDispatcher(),
+            classifier: .empty,
+            logger: MockLogger(),
+            defaults: kv)
+        #expect(second.autoBuffLoopEnabled == true)
+    }
 
-        #expect(coord.masterBuff == "ProductivityBuffLvl3")
-        #expect(coord.selectedBuff[cat1.id] == "ProductivityBuffLvl3")
-        #expect(coord.selectedBuff[cat2.id] == "ProductivityBuffLvl3")
+    @Test func timerIsArmedWhenLearnerHasDuration() async {
+        let buffs = makeBuffsStore(buffName: "ProductivityBuffLvl3")
+        let buildings = BuildingsStore()
+        buildings.apply(InboundMessage.BuildingsPayload(items: [
+            .init(gridIndex: 10, skin: "WoodCutter_01", uid1: 10, uid2: 0, activeBuff: nil),
+        ]))
+        let categories = BuildingCategoryRegistry(categories: [
+            BuildingCategory(displayName: "Lumber", skinBases: ["WoodCutter"], group: "Wood"),
+        ])
+        let kv = MockKeyValueStore()
+        let learner = BuffDurationLearner(defaults: kv, logger: MockLogger())
+        // Seed a learned duration so trackAndMaybeSchedule arms a Task.
+        learner.recordDispatch(uidKey: "99:0", buffName: "ProductivityBuffLvl3",
+                               at: Date(timeIntervalSince1970: 0))
+        learner.observe(buildings: [
+            BuildingsStore.BuildingItem(gridIndex: 99, skin: "WoodCutter_01", skinBase: "WoodCutter",
+                                        uid1: 99, uid2: 0, activeBuff: nil,
+                                        activeBuffApplianceMode: nil, paused: false)
+        ], now: Date(timeIntervalSince1970: 200))
+
+        let coord = BuffDispatchCoordinator(
+            buffsStore: buffs, buildingsStore: buildings,
+            dispatcher: CapturingDispatcher(), classifier: .empty,
+            categoryRegistry: categories,
+            bulk: BulkDispatcher(interCallDelayNs: 0),
+            logger: MockLogger(), defaults: kv, learner: learner)
+        // Long wake buffer so the task doesn't fire before the assertion.
+        coord.autoReBuffBuffer = 3600
+        coord.selectedBuff["Lumber"] = "ProductivityBuffLvl3"
+
+        coord.autoBuffLoopEnabled = true
+        await coord.lastAutoBuffSweep?.value
+
+        #expect(coord.pendingReBuffTasks["10:0"] != nil)
+    }
+
+    @Test func togglingLoopOffCancelsPendingReBuffs() async {
+        let buffs = makeBuffsStore(buffName: "ProductivityBuffLvl3")
+        let buildings = BuildingsStore()
+        buildings.apply(InboundMessage.BuildingsPayload(items: [
+            .init(gridIndex: 10, skin: "WoodCutter_01", uid1: 10, uid2: 0, activeBuff: nil),
+        ]))
+        let categories = BuildingCategoryRegistry(categories: [
+            BuildingCategory(displayName: "Lumber", skinBases: ["WoodCutter"], group: "Wood"),
+        ])
+        let kv = MockKeyValueStore()
+        let learner = BuffDurationLearner(defaults: kv, logger: MockLogger())
+        learner.recordDispatch(uidKey: "99:0", buffName: "ProductivityBuffLvl3",
+                               at: Date(timeIntervalSince1970: 0))
+        learner.observe(buildings: [
+            BuildingsStore.BuildingItem(gridIndex: 99, skin: "WoodCutter_01", skinBase: "WoodCutter",
+                                        uid1: 99, uid2: 0, activeBuff: nil,
+                                        activeBuffApplianceMode: nil, paused: false)
+        ], now: Date(timeIntervalSince1970: 200))
+
+        let coord = BuffDispatchCoordinator(
+            buffsStore: buffs, buildingsStore: buildings,
+            dispatcher: CapturingDispatcher(), classifier: .empty,
+            categoryRegistry: categories,
+            bulk: BulkDispatcher(interCallDelayNs: 0),
+            logger: MockLogger(), defaults: kv, learner: learner)
+        coord.autoReBuffBuffer = 3600
+        coord.selectedBuff["Lumber"] = "ProductivityBuffLvl3"
+        coord.autoBuffLoopEnabled = true
+        await coord.lastAutoBuffSweep?.value
+        #expect(coord.pendingReBuffTasks.count == 1)
+
+        coord.autoBuffLoopEnabled = false
+        #expect(coord.pendingReBuffTasks.isEmpty)
+    }
+
+    @Test func fireReBuffDispatchesWithCurrentCategorySelection() {
+        // Simulates a wake firing after the user changed the selector for
+        // this category: the fired buff must be the CURRENT selection, not
+        // the one originally dispatched when the timer was armed.
+        let buffs = BuffsStore(naming: .empty)
+        buffs.apply(InboundMessage.BuffsPayload(items: [
+            .init(uid1: 100, uid2: 200, buffName: "ProductivityBuffLvl3",
+                  resourceName: "", amount: 10, insertedAt: 0),
+            .init(uid1: 300, uid2: 400, buffName: "ProductivityBuffLvl300",
+                  resourceName: "", amount: 10, insertedAt: 0),
+        ]))
+        let buildings = BuildingsStore()
+        buildings.apply(InboundMessage.BuildingsPayload(items: [
+            .init(gridIndex: 10, skin: "WoodCutter_01", uid1: 10, uid2: 0, activeBuff: nil),
+        ]))
+        let categories = BuildingCategoryRegistry(categories: [
+            BuildingCategory(displayName: "Lumber", skinBases: ["WoodCutter"], group: "Wood"),
+        ])
+        let dispatcher = CapturingDispatcher()
+        let coord = BuffDispatchCoordinator(
+            buffsStore: buffs, buildingsStore: buildings,
+            dispatcher: dispatcher, classifier: .empty,
+            categoryRegistry: categories,
+            bulk: BulkDispatcher(interCallDelayNs: 0),
+            logger: MockLogger(), defaults: MockKeyValueStore())
+        coord.autoBuffLoopEnabled = true
+        coord.selectedBuff["Lumber"] = "ProductivityBuffLvl300"
+
+        coord.fireReBuff(uid: "10:0")
+
+        let sent = dispatcher.sent.compactMap { $0 as? DispatchBuffCommand }
+        #expect(sent.count == 1)
+        #expect(sent.first?.buffUid1 == 300)   // Lvl300 stack, not Lvl3
+        #expect(sent.first?.targetGrid == 10)
+    }
+
+    @Test func fireReBuffNoOpsWhenBuildingAlreadyBuffed() {
+        let buffs = makeBuffsStore(buffName: "ProductivityBuffLvl3")
+        let buildings = BuildingsStore()
+        buildings.apply(InboundMessage.BuildingsPayload(items: [
+            .init(gridIndex: 10, skin: "WoodCutter_01", uid1: 10, uid2: 0,
+                  activeBuff: "ProductivityBuffLvl3"),
+        ]))
+        let categories = BuildingCategoryRegistry(categories: [
+            BuildingCategory(displayName: "Lumber", skinBases: ["WoodCutter"], group: "Wood"),
+        ])
+        let dispatcher = CapturingDispatcher()
+        let coord = BuffDispatchCoordinator(
+            buffsStore: buffs, buildingsStore: buildings,
+            dispatcher: dispatcher, classifier: .empty,
+            categoryRegistry: categories,
+            bulk: BulkDispatcher(interCallDelayNs: 0),
+            logger: MockLogger(), defaults: MockKeyValueStore())
+        coord.autoBuffLoopEnabled = true
+        coord.selectedBuff["Lumber"] = "ProductivityBuffLvl3"
+
+        coord.fireReBuff(uid: "10:0")
+        #expect(dispatcher.sent.isEmpty)
+    }
+
+    @Test func enablingAutoBuffLoopFiresImmediateSweep() async {
+        // Two Woodcutters, both unbuffed. Flipping the toggle on must trigger
+        // a dispatch for each one via the selected buff — the same work
+        // `buffAllGroups` does, without the user clicking "Buff all".
+        let buffs = makeBuffsStore(buffName: "ProductivityBuffLvl3")
+        let buildings = BuildingsStore()
+        buildings.apply(InboundMessage.BuildingsPayload(items: [
+            .init(gridIndex: 10, skin: "WoodCutter_01", uid1: 10, uid2: 0, activeBuff: nil),
+            .init(gridIndex: 20, skin: "WoodCutter_01", uid1: 20, uid2: 0, activeBuff: nil),
+        ]))
+        let categories = BuildingCategoryRegistry(categories: [
+            BuildingCategory(displayName: "Lumber", skinBases: ["WoodCutter"], group: "Wood"),
+        ])
+        let dispatcher = CapturingDispatcher()
+        let coord = BuffDispatchCoordinator(
+            buffsStore: buffs, buildingsStore: buildings,
+            dispatcher: dispatcher, classifier: .empty,
+            categoryRegistry: categories,
+            bulk: BulkDispatcher(interCallDelayNs: 0),
+            logger: MockLogger(), defaults: MockKeyValueStore())
+        _ = coord.groups   // seed default selection
+        coord.selectedBuff["Lumber"] = "ProductivityBuffLvl3"
+
+        coord.autoBuffLoopEnabled = true
+        await coord.lastAutoBuffSweep?.value
+
+        let grids = dispatcher.sent.compactMap { ($0 as? DispatchBuffCommand)?.targetGrid }
+        #expect(Set(grids) == Set([10, 20]))
+    }
+
+    @Test func runAutoBuffSweepIsNoOpWhenDisabled() async {
+        // Handler calls `runAutoBuffSweep` after every BUILDINGS payload; when
+        // the toggle is off the sweep must return nil and dispatch nothing so
+        // unrelated apps can still reason about whose dispatches are whose.
+        let buffs = makeBuffsStore(buffName: "ProductivityBuffLvl3")
+        let buildings = BuildingsStore()
+        buildings.apply(InboundMessage.BuildingsPayload(items: [
+            .init(gridIndex: 10, skin: "WoodCutter_01", uid1: 10, uid2: 0, activeBuff: nil),
+        ]))
+        let dispatcher = CapturingDispatcher()
+        let coord = BuffDispatchCoordinator(
+            buffsStore: buffs, buildingsStore: buildings,
+            dispatcher: dispatcher, classifier: .empty,
+            bulk: BulkDispatcher(interCallDelayNs: 0),
+            logger: MockLogger(), defaults: MockKeyValueStore())
+
+        let task = coord.runAutoBuffSweep()
+        #expect(task == nil)
+        #expect(dispatcher.sent.isEmpty)
+    }
+
+    @Test func selectedBuffPersistsAcrossRelaunch() {
+        // A second coordinator built against the same KeyValueStore must
+        // hydrate `selectedBuff` from the first one's writes, so the user's
+        // per-category picks survive an app restart.
+        let kv = MockKeyValueStore()
+        let first = BuffDispatchCoordinator(
+            buffsStore: BuffsStore(naming: .empty),
+            buildingsStore: BuildingsStore(),
+            dispatcher: CapturingDispatcher(),
+            classifier: .empty,
+            logger: MockLogger(),
+            defaults: kv)
+        first.selectedBuff["Mines"] = "ProductivityBuffLvl300"
+        first.selectedBuff["Masons"] = "ProductivityBuffLvl3"
+
+        let second = BuffDispatchCoordinator(
+            buffsStore: BuffsStore(naming: .empty),
+            buildingsStore: BuildingsStore(),
+            dispatcher: CapturingDispatcher(),
+            classifier: .empty,
+            logger: MockLogger(),
+            defaults: kv)
+
+        #expect(second.selectedBuff["Mines"] == "ProductivityBuffLvl300")
+        #expect(second.selectedBuff["Masons"] == "ProductivityBuffLvl3")
     }
 
     @Test func buffAllSendsOnePerBuilding() async {
@@ -527,7 +738,7 @@ struct BuffDispatchCoordinatorTests {
             dispatcher: dispatcher,
             classifier: .empty,
             bulk: BulkDispatcher(interCallDelayNs: 0),
-            logger: MockLogger())
+            logger: MockLogger(), defaults: MockKeyValueStore())
 
         let task = coord.buffAll(group: buildings.items, buffName: "ProductivityBuffLvl3")
         await task?.value
@@ -568,7 +779,7 @@ struct BuffDispatchCoordinatorTests {
             dispatcher: CapturingDispatcher(),
             classifier: .empty,
             bulk: BulkDispatcher(interCallDelayNs: 0),
-            logger: MockLogger())
+            logger: MockLogger(), defaults: MockKeyValueStore())
         coord.buffBannerHideDelay = 30   // survive CI await race
 
         #expect(coord.buffBannerText == nil)
@@ -613,7 +824,7 @@ struct BuffDispatchCoordinatorTests {
             classifier: .empty,
             categoryRegistry: categories,
             bulk: BulkDispatcher(interCallDelayNs: 0),
-            logger: MockLogger())
+            logger: MockLogger(), defaults: MockKeyValueStore())
         coord.buffBannerHideDelay = 5   // keep banner visible for assertion
         let snapshot = coord.groups
         coord.selectedBuff["Lumber"] = "ProductivityBuffLvl3"
@@ -636,7 +847,7 @@ struct BuffDispatchCoordinatorTests {
             dispatcher: dispatcher,
             classifier: .empty,
             bulk: BulkDispatcher(interCallDelayNs: 0),
-            logger: MockLogger())
+            logger: MockLogger(), defaults: MockKeyValueStore())
 
         let task = coord.buffAll(group: buildings.items, buffName: "DoesNotExist")
         await task?.value
@@ -662,13 +873,75 @@ struct BuffDispatchCoordinatorTests {
             dispatcher: dispatcher,
             classifier: .empty,
             bulk: BulkDispatcher(interCallDelayNs: 0),
-            logger: MockLogger())
+            logger: MockLogger(), defaults: MockKeyValueStore())
 
         let task = coord.buffAll(group: buildings.items, buffName: "ProductivityBuffLvl3")
         await task?.value
 
         let grids = dispatcher.sent.compactMap { ($0 as? DispatchBuffCommand)?.targetGrid }
         #expect(Set(grids) == Set([10, 30]))
+    }
+
+    @Test func buffAllSkipsPausedBuildings() async {
+        // Grid 10 unbuffed + unpaused, grid 20 unbuffed + paused, grid 30
+        // unbuffed + unpaused. Dispatch must hit 10 and 30 only — the paused
+        // row would consume a buff stack with zero production benefit.
+        let buffs = makeBuffsStore(buffName: "ProductivityBuffLvl3")
+        let buildings = BuildingsStore()
+        buildings.apply(InboundMessage.BuildingsPayload(items: [
+            .init(gridIndex: 10, skin: "WoodCutter_01", uid1: 10, uid2: 0, activeBuff: nil, paused: false),
+            .init(gridIndex: 20, skin: "WoodCutter_01", uid1: 20, uid2: 0, activeBuff: nil, paused: true),
+            .init(gridIndex: 30, skin: "WoodCutter_01", uid1: 30, uid2: 0, activeBuff: nil, paused: false),
+        ]))
+        let dispatcher = CapturingDispatcher()
+        let coord = BuffDispatchCoordinator(
+            buffsStore: buffs,
+            buildingsStore: buildings,
+            dispatcher: dispatcher,
+            classifier: .empty,
+            bulk: BulkDispatcher(interCallDelayNs: 0),
+            logger: MockLogger(), defaults: MockKeyValueStore())
+
+        let task = coord.buffAll(group: buildings.items, buffName: "ProductivityBuffLvl3")
+        await task?.value
+
+        let grids = dispatcher.sent.compactMap { ($0 as? DispatchBuffCommand)?.targetGrid }
+        #expect(Set(grids) == Set([10, 30]))
+    }
+
+    @Test func buffAllGroupsSkipsPausedAcrossCategories() async {
+        // Lumber: one unpaused + one paused. Stone: one paused + one unpaused.
+        // Master dispatch must touch the two unpaused grids only.
+        let buffs = makeBuffsStore(buffName: "ProductivityBuffLvl3")
+        let buildings = BuildingsStore()
+        buildings.apply(InboundMessage.BuildingsPayload(items: [
+            .init(gridIndex: 10, skin: "WoodCutter_01", uid1: 10, uid2: 0, activeBuff: nil, paused: false),
+            .init(gridIndex: 11, skin: "WoodCutter_01", uid1: 11, uid2: 0, activeBuff: nil, paused: true),
+            .init(gridIndex: 20, skin: "Mason_01",      uid1: 20, uid2: 0, activeBuff: nil, paused: true),
+            .init(gridIndex: 21, skin: "Mason_01",      uid1: 21, uid2: 0, activeBuff: nil, paused: false),
+        ]))
+        let categories = BuildingCategoryRegistry(categories: [
+            BuildingCategory(displayName: "Lumber", skinBases: ["WoodCutter"], group: "Wood"),
+            BuildingCategory(displayName: "Stone",  skinBases: ["Mason"],      group: "Masons"),
+        ])
+        let dispatcher = CapturingDispatcher()
+        let coord = BuffDispatchCoordinator(
+            buffsStore: buffs,
+            buildingsStore: buildings,
+            dispatcher: dispatcher,
+            classifier: .empty,
+            categoryRegistry: categories,
+            bulk: BulkDispatcher(interCallDelayNs: 0),
+            logger: MockLogger(), defaults: MockKeyValueStore())
+        let snapshot = coord.groups
+        coord.selectedBuff["Lumber"] = "ProductivityBuffLvl3"
+        coord.selectedBuff["Stone"]  = "ProductivityBuffLvl3"
+
+        let task = coord.buffAllGroups(snapshot: snapshot)
+        await task?.value
+
+        let grids = dispatcher.sent.compactMap { ($0 as? DispatchBuffCommand)?.targetGrid }
+        #expect(Set(grids) == Set([10, 21]))
     }
 
     @Test func buffAllWhenEveryBuildingIsBuffedIsNoOp() async {
@@ -685,7 +958,7 @@ struct BuffDispatchCoordinatorTests {
             dispatcher: dispatcher,
             classifier: .empty,
             bulk: BulkDispatcher(interCallDelayNs: 0),
-            logger: MockLogger())
+            logger: MockLogger(), defaults: MockKeyValueStore())
 
         let task = coord.buffAll(group: buildings.items, buffName: "ProductivityBuffLvl3")
         await task?.value
@@ -696,7 +969,7 @@ struct BuffDispatchCoordinatorTests {
 
     @Test func buffAllGroupsSkipsBuffedAcrossCategories() async {
         // Two categories. Lumber has one buffed + one unbuffed; Stone has
-        // both unbuffed. Master dispatch must touch the three unbuffed grids
+        // both unbuffed. Bulk dispatch must touch the three unbuffed grids
         // and leave the already-buffed one alone.
         let buffs = makeBuffsStore(buffName: "ProductivityBuffLvl3")
         let buildings = BuildingsStore()
@@ -718,9 +991,11 @@ struct BuffDispatchCoordinatorTests {
             classifier: .empty,
             categoryRegistry: categories,
             bulk: BulkDispatcher(interCallDelayNs: 0),
-            logger: MockLogger())
+            logger: MockLogger(), defaults: MockKeyValueStore())
         let snapshot = coord.groups
-        coord.selectMasterBuff("ProductivityBuffLvl3", across: snapshot)
+        for group in snapshot {
+            coord.selectedBuff[group.category.id] = "ProductivityBuffLvl3"
+        }
 
         let task = coord.buffAllGroups(snapshot: snapshot)
         await task?.value
@@ -768,7 +1043,7 @@ struct BuffDispatchCoordinatorTests {
             classifier: .empty,
             categoryRegistry: categories,
             panelConfig: panelConfig,
-            logger: MockLogger())
+            logger: MockLogger(), defaults: MockKeyValueStore())
 
         _ = coord.groups   // triggers applyDefaults
 
@@ -796,7 +1071,7 @@ struct BuffDispatchCoordinatorTests {
             classifier: .empty,
             categoryRegistry: categories,
             panelConfig: panelConfig,
-            logger: MockLogger())
+            logger: MockLogger(), defaults: MockKeyValueStore())
 
         let names = coord.groups.map(\.category.displayName)
         #expect(names == ["Stone Mason"])
@@ -822,7 +1097,7 @@ struct BuffDispatchCoordinatorTests {
             dispatcher: CapturingDispatcher(),
             classifier: .empty,
             categoryRegistry: categories,
-            logger: MockLogger())
+            logger: MockLogger(), defaults: MockKeyValueStore())
     }
 
     @Test func filteredSnapshotEmptyQueryReturnsEverything() {
@@ -875,13 +1150,187 @@ struct BuffDispatchCoordinatorTests {
         buffs.apply(payload)
         let classifier = BuffCategoryClassifier(rules: [
             .buildingBuffs: .init(prefixes: ["ProductivityBuff"], exact: [])
-        ])
+        ], scopeByPrefix: [:], scopeByName: [:])
         let coord = BuffDispatchCoordinator(
             buffsStore: buffs, buildingsStore: BuildingsStore(),
             dispatcher: CapturingDispatcher(),
-            classifier: classifier, logger: MockLogger())
+            classifier: classifier, logger: MockLogger(), defaults: MockKeyValueStore())
 
         let names = coord.buildingBuffs.map(\.buffName)
         #expect(names == ["ProductivityBuffLvl3"])
+    }
+
+    // --- zone-context-scoped selection -----------------------------------
+    // Home selections persist. Friend selections are in-memory only and seed
+    // to Fish Platter (ProductivityBuffLvl1). Returning home reloads the
+    // persisted JSON — any friend-side tweaks are discarded.
+
+    private func makeDualBuffsStore() -> BuffsStore {
+        let store = BuffsStore(naming: .empty)
+        store.apply(InboundMessage.BuffsPayload(items: [
+            .init(uid1: 101, uid2: 0, buffName: "ProductivityBuffLvl1",
+                  resourceName: "", amount: 50, insertedAt: 0),
+            .init(uid1: 303, uid2: 0, buffName: "ProductivityBuffLvl3",
+                  resourceName: "", amount: 50, insertedAt: 0),
+        ]))
+        return store
+    }
+
+    @Test func friendContextSeedsFishPlatterForEveryCategory() {
+        let buffs = makeDualBuffsStore()
+        let buildings = BuildingsStore()
+        buildings.apply(InboundMessage.BuildingsPayload(items: [
+            .init(gridIndex: 10, skin: "WoodCutter_01", uid1: 10, uid2: 0, activeBuff: nil),
+            .init(gridIndex: 20, skin: "Mason_01",      uid1: 20, uid2: 0, activeBuff: nil),
+        ]))
+        let categories = BuildingCategoryRegistry(categories: [
+            BuildingCategory(displayName: "Lumber", skinBases: ["WoodCutter"], group: "Wood"),
+            BuildingCategory(displayName: "Stone",  skinBases: ["Mason"],      group: "Masons"),
+        ])
+        let coord = BuffDispatchCoordinator(
+            buffsStore: buffs, buildingsStore: buildings,
+            dispatcher: CapturingDispatcher(), classifier: .empty,
+            categoryRegistry: categories,
+            logger: MockLogger(), defaults: MockKeyValueStore())
+
+        coord.setZoneContext("friend")
+        _ = coord.groups  // triggers applyDefaults for friend context
+
+        #expect(coord.selectedBuff["Lumber"] == "ProductivityBuffLvl1")
+        #expect(coord.selectedBuff["Stone"]  == "ProductivityBuffLvl1")
+    }
+
+    @Test func friendSelectionDoesNotPersistToDefaults() {
+        let buffs = makeDualBuffsStore()
+        let buildings = BuildingsStore()
+        buildings.apply(InboundMessage.BuildingsPayload(items: [
+            .init(gridIndex: 10, skin: "WoodCutter_01", uid1: 10, uid2: 0, activeBuff: nil),
+        ]))
+        let categories = BuildingCategoryRegistry(categories: [
+            BuildingCategory(displayName: "Lumber", skinBases: ["WoodCutter"], group: "Wood"),
+        ])
+        let kv = MockKeyValueStore()
+        let coord = BuffDispatchCoordinator(
+            buffsStore: buffs, buildingsStore: buildings,
+            dispatcher: CapturingDispatcher(), classifier: .empty,
+            categoryRegistry: categories,
+            logger: MockLogger(), defaults: kv)
+
+        coord.setZoneContext("friend")
+        coord.selectedBuff["Lumber"] = "ProductivityBuffLvl3"
+
+        // Friend-side writes stay in-memory only — nothing landed in
+        // defaults under the home selection key.
+        let persisted = kv.dictionary(forKey: "buffs.selectedBuff") as? [String: String]
+        #expect(persisted?["Lumber"] == nil)
+    }
+
+    @Test func returningHomeReloadsPersistedSelection() {
+        let buffs = makeDualBuffsStore()
+        let buildings = BuildingsStore()
+        buildings.apply(InboundMessage.BuildingsPayload(items: [
+            .init(gridIndex: 10, skin: "WoodCutter_01", uid1: 10, uid2: 0, activeBuff: nil),
+        ]))
+        let categories = BuildingCategoryRegistry(categories: [
+            BuildingCategory(displayName: "Lumber", skinBases: ["WoodCutter"], group: "Wood"),
+        ])
+        let kv = MockKeyValueStore()
+        let coord = BuffDispatchCoordinator(
+            buffsStore: buffs, buildingsStore: buildings,
+            dispatcher: CapturingDispatcher(), classifier: .empty,
+            categoryRegistry: categories,
+            logger: MockLogger(), defaults: kv)
+
+        // User sets a home selection — Level 3 Aunt Irma's Basket.
+        coord.selectedBuff["Lumber"] = "ProductivityBuffLvl3"
+
+        // Visit a friend; coordinator seeds to Fish Platter.
+        coord.setZoneContext("friend")
+        _ = coord.groups
+        #expect(coord.selectedBuff["Lumber"] == "ProductivityBuffLvl1")
+
+        // User tweaks the friend selection mid-visit — should be discarded.
+        coord.selectedBuff["Lumber"] = "ProductivityBuffLvl3"
+
+        // Return home — home-side selection reloaded from persisted JSON.
+        coord.setZoneContext("home")
+        #expect(coord.selectedBuff["Lumber"] == "ProductivityBuffLvl3")
+    }
+
+    @Test func homeToFriendRoundTripPreservesHomeSelection() {
+        let buffs = makeDualBuffsStore()
+        let buildings = BuildingsStore()
+        buildings.apply(InboundMessage.BuildingsPayload(items: [
+            .init(gridIndex: 10, skin: "WoodCutter_01", uid1: 10, uid2: 0, activeBuff: nil),
+        ]))
+        let categories = BuildingCategoryRegistry(categories: [
+            BuildingCategory(displayName: "Lumber", skinBases: ["WoodCutter"], group: "Wood"),
+        ])
+        let kv = MockKeyValueStore()
+        let coord = BuffDispatchCoordinator(
+            buffsStore: buffs, buildingsStore: buildings,
+            dispatcher: CapturingDispatcher(), classifier: .empty,
+            categoryRegistry: categories,
+            logger: MockLogger(), defaults: kv)
+
+        coord.selectedBuff["Lumber"] = "ProductivityBuffLvl3"
+        coord.setZoneContext("friend")
+        coord.setZoneContext("home")
+
+        #expect(coord.selectedBuff["Lumber"] == "ProductivityBuffLvl3")
+    }
+
+    @Test func friendRevisitResetsPriorFriendSelection() {
+        // User visits a friend, overrides the Fish Platter default to Lvl 3,
+        // returns home, visits a friend again — the friend map should be
+        // reset back to Fish Platter (not reuse the prior override).
+        let buffs = makeDualBuffsStore()
+        let buildings = BuildingsStore()
+        buildings.apply(InboundMessage.BuildingsPayload(items: [
+            .init(gridIndex: 10, skin: "WoodCutter_01", uid1: 10, uid2: 0, activeBuff: nil),
+        ]))
+        let categories = BuildingCategoryRegistry(categories: [
+            BuildingCategory(displayName: "Lumber", skinBases: ["WoodCutter"], group: "Wood"),
+        ])
+        let coord = BuffDispatchCoordinator(
+            buffsStore: buffs, buildingsStore: buildings,
+            dispatcher: CapturingDispatcher(), classifier: .empty,
+            categoryRegistry: categories,
+            logger: MockLogger(), defaults: MockKeyValueStore())
+
+        coord.setZoneContext("friend")
+        _ = coord.groups
+        coord.selectedBuff["Lumber"] = "ProductivityBuffLvl3"
+
+        coord.setZoneContext("home")
+        coord.setZoneContext("friend")
+        _ = coord.groups
+
+        #expect(coord.selectedBuff["Lumber"] == "ProductivityBuffLvl1")
+    }
+
+    @Test func adventureContextBehavesLikeFriend() {
+        let buffs = makeDualBuffsStore()
+        let buildings = BuildingsStore()
+        buildings.apply(InboundMessage.BuildingsPayload(items: [
+            .init(gridIndex: 10, skin: "WoodCutter_01", uid1: 10, uid2: 0, activeBuff: nil),
+        ]))
+        let categories = BuildingCategoryRegistry(categories: [
+            BuildingCategory(displayName: "Lumber", skinBases: ["WoodCutter"], group: "Wood"),
+        ])
+        let kv = MockKeyValueStore()
+        let coord = BuffDispatchCoordinator(
+            buffsStore: buffs, buildingsStore: buildings,
+            dispatcher: CapturingDispatcher(), classifier: .empty,
+            categoryRegistry: categories,
+            logger: MockLogger(), defaults: kv)
+
+        coord.selectedBuff["Lumber"] = "ProductivityBuffLvl3"
+        coord.setZoneContext("adventure")
+        _ = coord.groups
+        #expect(coord.selectedBuff["Lumber"] == "ProductivityBuffLvl1")
+        coord.setZoneContext("home")
+        // Persisted Lvl3 re-asserted on return.
+        #expect(coord.selectedBuff["Lumber"] == "ProductivityBuffLvl3")
     }
 }

@@ -9,8 +9,6 @@ struct BuffsPanel: View {
 
     var body: some View {
         // Compute once per body invocation so each row reads from the same snapshot.
-        let snapshot = coordinator.groups
-        let buffs = coordinator.buildingBuffs
         let buffsVersion = buffsStore.version
         let trimmedQuery = searchText.trimmingCharacters(in: .whitespaces)
         let visibleSections = coordinator.filteredGroupedSnapshot(matching: trimmedQuery)
@@ -32,7 +30,8 @@ struct BuffsPanel: View {
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
                     .padding()
             } else {
-                masterRow(buffs: buffs, snapshot: snapshot)
+                autoLoopToggle
+                zoneBuffsRow
                 searchField
                 Divider()
                 if visibleSections.isEmpty {
@@ -49,11 +48,13 @@ struct BuffsPanel: View {
                                 SectionHeader(group: section.group, count: section.items.count)
                                 ForEach(section.items, id: \.category.id) { group in
                                     let sel = coordinator.selectedBuff[group.category.id] ?? ""
+                                    let scoped = coordinator.buildingBuffs(for: group.category)
                                     BuildingGroupRow(
                                         categoryDisplayName: group.category.displayName,
                                         buildingsCount: group.buildings.count,
                                         buffedCount: group.buildings.reduce(0) { $0 + ($1.activeBuff != nil ? 1 : 0) },
-                                        availableBuffs: buffs,
+                                        pausedCount: group.buildings.reduce(0) { $0 + ($1.paused ? 1 : 0) },
+                                        availableBuffs: scoped,
                                         buffsVersion: buffsVersion,
                                         selectedBuff: sel,
                                         onSelect: { newName in
@@ -84,6 +85,30 @@ struct BuffsPanel: View {
             }
         }
         .animation(.easeInOut(duration: 0.2), value: coordinator.buffBannerText)
+    }
+
+    // Auto-buff loop toggle. Turning it on fires an immediate sweep; from
+    // then on every inbound BUILDINGS payload re-runs `buffAllGroups`, so a
+    // buff that drops off server-side gets re-applied on the next update
+    // (activeBuff flips from a name back to nil, passing the skip filter).
+    private var autoLoopToggle: some View {
+        HStack {
+            Toggle(isOn: Binding(
+                get: { coordinator.autoBuffLoopEnabled },
+                set: { coordinator.autoBuffLoopEnabled = $0 }
+            )) {
+                VStack(alignment: .leading, spacing: 1) {
+                    Text("Auto-buff loop").font(.caption).bold()
+                    Text("Reapplies selections when buffs expire")
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                }
+            }
+            .toggleStyle(.switch)
+            .controlSize(.small)
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 6)
     }
 
     private var searchField: some View {
@@ -123,52 +148,56 @@ struct BuffsPanel: View {
         .padding(.vertical, 8)
     }
 
-    // Menu that overrides every visible group's selection when an item is picked,
-    // plus a "Buff all" button that fires the selected buff across every group.
-    private func masterRow(
-        buffs: [BuffsStore.BuffItem],
-        snapshot: [(category: BuildingCategory, buildings: [BuildingsStore.BuildingItem])]
-    ) -> some View {
-        let label = coordinator.masterBuff.isEmpty
-            ? "— select buff —"
-            : (buffs.first { $0.buffName == coordinator.masterBuff }?.displayLabel ?? coordinator.masterBuff)
-        let totalBuildings = snapshot.reduce(0) { acc, entry in
-            entry.category.group == BuildingGroup.unmapped.rawValue ? acc : acc + entry.buildings.count
-        }
-        return VStack(alignment: .leading, spacing: 4) {
-            HStack {
-                Text("Override all groups")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                Spacer()
-                Text("\(totalBuildings) buildings")
-                    .font(.caption2)
-                    .foregroundStyle(.secondary)
-            }
-            HStack(spacing: 6) {
-                Menu {
-                    Button("— select buff —") {
-                        coordinator.selectMasterBuff("", across: snapshot)
-                    }
-                    ForEach(buffs) { buff in
-                        Button(buff.displayLabel) {
-                            coordinator.selectMasterBuff(buff.buffName, across: snapshot)
+    // Zone-wide buffs are dispatched via a separate server opcode (TBD —
+    // we don't yet have the wire format, so Apply is disabled). The dropdown
+    // is surfaced at the top so the user can see what zone buffs they own
+    // and pick one for when dispatch lands. Once the opcode is captured
+    // (sniff an in-game zone-buff application), replace the disabled state
+    // with a real call into the coordinator.
+    @ViewBuilder
+    private var zoneBuffsRow: some View {
+        let zoneBuffs = coordinator.zoneBuffs
+        if !zoneBuffs.isEmpty {
+            VStack(alignment: .leading, spacing: 4) {
+                HStack {
+                    Text("Zone buffs")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    Spacer()
+                    Text("\(zoneBuffs.count) available")
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                }
+                HStack(spacing: 6) {
+                    Menu {
+                        Button("— select zone buff —") {
+                            coordinator.selectedZoneBuff = ""
                         }
+                        ForEach(zoneBuffs) { buff in
+                            Button(buff.displayLabel) {
+                                coordinator.selectedZoneBuff = buff.buffName
+                            }
+                        }
+                    } label: {
+                        let label = coordinator.selectedZoneBuff.isEmpty
+                            ? "— select zone buff —"
+                            : (zoneBuffs.first { $0.buffName == coordinator.selectedZoneBuff }?.displayLabel
+                                ?? coordinator.selectedZoneBuff)
+                        Text(label).frame(maxWidth: .infinity, alignment: .leading)
                     }
-                } label: {
-                    Text(label).frame(maxWidth: .infinity, alignment: .leading)
-                }
 
-                Button("Buff all") {
-                    coordinator.buffAllGroups(snapshot: snapshot)
+                    Button("Apply") { /* TODO: wire zone-buff dispatch */ }
+                        .buttonStyle(.borderedProminent)
+                        .controlSize(.small)
+                        .disabled(true)
+                        .help("Zone-buff dispatch not yet wired — need to capture the server opcode from an in-game application.")
                 }
-                .buttonStyle(.borderedProminent)
-                .controlSize(.small)
             }
+            .padding(.horizontal, 12)
+            .padding(.vertical, 8)
         }
-        .padding(.horizontal, 12)
-        .padding(.vertical, 8)
     }
+
 }
 
 // Small tinted bar that announces each building-group bucket.
@@ -202,6 +231,7 @@ private struct BuildingGroupRow: View, Equatable {
     let categoryDisplayName: String
     let buildingsCount: Int
     let buffedCount: Int
+    let pausedCount: Int
     let availableBuffs: [BuffsStore.BuffItem]
     let buffsVersion: Int
     let selectedBuff: String
@@ -212,6 +242,7 @@ private struct BuildingGroupRow: View, Equatable {
         lhs.categoryDisplayName == rhs.categoryDisplayName &&
         lhs.buildingsCount      == rhs.buildingsCount &&
         lhs.buffedCount         == rhs.buffedCount &&
+        lhs.pausedCount         == rhs.pausedCount &&
         lhs.buffsVersion        == rhs.buffsVersion &&
         lhs.selectedBuff        == rhs.selectedBuff
     }
@@ -231,6 +262,14 @@ private struct BuildingGroupRow: View, Equatable {
                         .font(.caption2).foregroundStyle(.secondary)
                 }
                 Spacer()
+                if pausedCount > 0 {
+                    Text("\(pausedCount) asleep")
+                        .font(.caption2).bold()
+                        .foregroundStyle(.white)
+                        .padding(.horizontal, 6).padding(.vertical, 2)
+                        .background(Color.orange, in: Capsule())
+                        .help("Buildings with production paused — skipped by buff dispatch")
+                }
                 if buffedCount > 0 {
                     Text("\(buffedCount) buffed")
                         .font(.caption2).bold()

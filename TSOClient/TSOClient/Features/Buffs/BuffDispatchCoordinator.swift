@@ -1,17 +1,98 @@
 import Foundation
 import Observation
 
-// View-model for the BuffsPanel. Owns per-category buff selection state, the
-// master-buff override, and the bulk-buff dispatch loops.
+// View-model for the BuffsPanel. Owns per-category buff selection state and
+// the bulk-buff dispatch loops.
 @Observable
 final class BuffDispatchCoordinator {
-    // Selected buff name per category (keyed by category.id).
-    var selectedBuff: [String: String] = [:]
-    // Master picker selection; setting this overrides every visible group.
-    var masterBuff: String = ""
+    // Selected buff name per category (keyed by category.id). Zone-context
+    // scoped: when at home, reads/writes to `homeSelectedBuff` which is
+    // persisted through `defaults`. When visiting a friend (or in an
+    // adventure), reads/writes to `friendSelectedBuff` which is in-memory
+    // only — reset on every entry into non-home context and seeded to Fish
+    // Platter so a quick friend-visit buff doesn't burn through our home
+    // stacks. On return to home the persisted JSON is reloaded, so any
+    // tweaks the user made while visiting are discarded.
+    var selectedBuff: [String: String] = [:] {
+        didSet {
+            if zoneContext == "home" {
+                homeSelectedBuff = selectedBuff
+                defaults.set(selectedBuff, forKey: Keys.selectedBuff)
+            } else {
+                friendSelectedBuff = selectedBuff
+            }
+        }
+    }
+    // Backing maps for each context. Only `homeSelectedBuff` is persisted.
+    private var homeSelectedBuff: [String: String] = [:]
+    private var friendSelectedBuff: [String: String] = [:]
+    // Current zone context, driven by ZoneContextHandler. Swapping this
+    // stashes the outgoing map and loads the incoming one; a friend/adventure
+    // transition resets the in-memory map so `applyDefaults` reseeds every
+    // category to `friendContextDefaultBuff`.
+    var zoneContext: String = "home" {
+        willSet {
+            if zoneContext == "home" {
+                homeSelectedBuff = selectedBuff
+            } else {
+                friendSelectedBuff = selectedBuff
+            }
+        }
+        didSet {
+            guard oldValue != zoneContext else { return }
+            if zoneContext == "home" {
+                let persisted = defaults.dictionary(forKey: Keys.selectedBuff) ?? [:]
+                homeSelectedBuff = persisted.compactMapValues { $0 as? String }
+                selectedBuff = homeSelectedBuff
+            } else {
+                friendSelectedBuff = [:]
+                selectedBuff = friendSelectedBuff
+            }
+        }
+    }
+    // Public entry point used by ZoneContextHandler (see BuffZoneContextSink
+    // conformance at the bottom of this file).
+    func setZoneContext(_ context: String) { zoneContext = context }
+    // Selected zone-wide buff (populated from `zoneBuffs`). Dispatch is not
+    // wired yet — the server opcode for zone-buff application is unknown.
+    // Not persisted across launches: zone buffs are high-value and should be
+    // a deliberate pick each session.
+    var selectedZoneBuff: String = ""
+    // When true, every fresh BUILDINGS payload triggers `buffAllGroups` with
+    // the current per-category selections. Buildings already carrying an
+    // active buff are skipped by the existing filter, so this is effectively
+    // a "re-buff on expiry" loop: when a buff drops off server-side the next
+    // BUILDINGS inbound will show activeBuff=null and the sweep fires on it.
+    // Setting the flag to true also kicks off an immediate sweep so the user
+    // doesn't have to wait for the next zone reload.
+    var autoBuffLoopEnabled: Bool = false {
+        didSet {
+            defaults.set(autoBuffLoopEnabled, forKey: Keys.autoBuffLoopEnabled)
+            if autoBuffLoopEnabled, !oldValue {
+                lastAutoBuffSweep = runAutoBuffSweep()
+            }
+            if !autoBuffLoopEnabled, oldValue {
+                cancelAllPendingReBuffs()
+            }
+        }
+    }
+    private(set) var lastAutoBuffSweep: Task<Void, Never>?
+    // Per-building wake timers, keyed by BuildingItem.id ("uid1:uid2").
+    // Armed when a buff is dispatched and we have a learned duration for
+    // that buff name; fires `reBuffBuilding(uid:)` on wake.
+    private(set) var pendingReBuffTasks: [String: Task<Void, Never>] = [:]
+    // Slack added to the learned duration before waking. Server-side expiry
+    // may lag a few seconds past the learned value; the sweep will skip the
+    // building if it's still buffed when we wake.
+    var autoReBuffBuffer: TimeInterval = 15
+
+    private enum Keys {
+        static let selectedBuff        = "buffs.selectedBuff"
+        static let autoBuffLoopEnabled = "buffs.autoBuffLoopEnabled"
+    }
 
     // Transient banner surfaced by BuffsPanel when buildings are buffed
-    // (per-category bulk or master "Buff all"). Mirrors the specialist
+    // (per-category bulk or auto-loop sweep). Mirrors the specialist
     // dispatch banner — bursts within `buffBannerHideDelay` of the last
     // dispatch coalesce into one banner.
     private(set) var buffBannerText: String?
@@ -29,6 +110,8 @@ final class BuffDispatchCoordinator {
     private let naming: NamingRegistry
     private let bulk: BulkDispatching
     private let logger: Logger
+    private let defaults: KeyValueStore
+    private let learner: BuffDurationLearner
 
     init(buffsStore: BuffsStore,
          buildingsStore: BuildingsStore,
@@ -38,7 +121,9 @@ final class BuffDispatchCoordinator {
          panelConfig: BuffPanelConfig = .default,
          naming: NamingRegistry = .default,
          bulk: BulkDispatching = BulkDispatcher.default,
-         logger: Logger = ConsoleLogger()) {
+         logger: Logger = ConsoleLogger(),
+         defaults: KeyValueStore = UserDefaultsKeyValueStore(),
+         learner: BuffDurationLearner? = nil) {
         self.buffsStore = buffsStore
         self.buildingsStore = buildingsStore
         self.dispatcher = dispatcher
@@ -48,14 +133,135 @@ final class BuffDispatchCoordinator {
         self.naming = naming
         self.bulk = bulk
         self.logger = logger
+        self.defaults = defaults
+        self.learner = learner ?? BuffDurationLearner(defaults: defaults, logger: logger)
+        if let raw = defaults.dictionary(forKey: Keys.selectedBuff) {
+            let loaded = raw.compactMapValues { $0 as? String }
+            self.homeSelectedBuff = loaded
+            self.selectedBuff = loaded
+        }
+        self.autoBuffLoopEnabled = defaults.bool(forKey: Keys.autoBuffLoopEnabled)
+    }
+
+    // Public entry point for BuildingsHandler. Observes current buildings so
+    // the learner can resolve any tracked dispatches whose buffs have
+    // expired, then fires `buffAllGroups` with the current per-category
+    // selections when the loop is enabled. Observation runs regardless of
+    // the toggle so learned durations keep accumulating even when auto-loop
+    // is off (e.g., if the user manually clicked "Buff all" earlier).
+    @discardableResult
+    func runAutoBuffSweep() -> Task<Void, Never>? {
+        learner.observe(buildings: buildingsStore.items)
+        guard autoBuffLoopEnabled else { return nil }
+        return buffAllGroups(snapshot: groups)
+    }
+
+    // Called after every successful dispatcher.dispatchBuff invocation.
+    // Hands the (uid, buffName, now) tuple to the learner and, if the loop
+    // is on and the learner has seen this buff expire before, arms a
+    // per-building wake Task at now + learnedDuration + autoReBuffBuffer.
+    // Previous wake for the same uid is cancelled first so back-to-back
+    // dispatches don't accumulate timers.
+    private func trackAndMaybeSchedule(building: BuildingsStore.BuildingItem,
+                                        buffName: String) {
+        let now = Date()
+        let uid = building.id
+        learner.recordDispatch(uidKey: uid, buffName: buffName, at: now)
+        // At dispatch time we don't yet know the applianceMode the server
+        // will assign — pass nil and let the learner's fallback chain pick
+        // the best estimate: any-mode bucket first, then max across modes.
+        // When the BUILDINGS payload echoes the buff back, the learner will
+        // latch the mode and the NEXT re-fire for this uid (after the wake
+        // fires `fireReBuff`, which calls back into this method) can benefit
+        // from a mode-specific duration if we have one.
+        guard autoBuffLoopEnabled,
+              let duration = learner.learnedDuration(for: buffName,
+                                                     applianceMode: nil) else { return }
+        let wakeIn = max(0, duration + autoReBuffBuffer)
+        pendingReBuffTasks[uid]?.cancel()
+        pendingReBuffTasks[uid] = Task { @MainActor [weak self] in
+            try? await Task.sleep(nanoseconds: UInt64(wakeIn * 1_000_000_000))
+            if Task.isCancelled { return }
+            self?.fireReBuff(uid: uid)
+        }
+    }
+
+    // Wake-body, extracted so tests can drive the re-buff path without
+    // waiting on a real Task.sleep. On wake: check the auto-loop is still
+    // on, the building still exists, it isn't buffed/paused/unknown, and
+    // its category still has a buff selected. Then dispatch a single buff.
+    // Uses the category's CURRENT `selectedBuff` (not the originally-
+    // dispatched one), matching the "Use current selection" wake behavior
+    // the user specified — a mid-session selector change takes effect at
+    // the next re-buff.
+    func fireReBuff(uid: String) {
+        pendingReBuffTasks.removeValue(forKey: uid)
+        guard autoBuffLoopEnabled else { return }
+        guard let building = buildingsStore.items.first(where: { $0.id == uid }) else { return }
+        guard building.activeBuff == nil, !building.paused else { return }
+        guard let category = category(for: building) else { return }
+        let buffName = selectedBuff[category.id] ?? ""
+        guard !buffName.isEmpty, let buff = buffsStore.item(for: buffName) else { return }
+        logger.log("[AutoBuff] timer wake — re-buffing uid=\(uid) grid=\(building.gridIndex) buff=\(buffName)")
+        dispatcher.dispatchBuff(
+            buffUid1: buff.uid1,
+            buffUid2: buff.uid2,
+            targetGrid: building.gridIndex)
+        noteBuffDispatched(buffLabel: buff.displayLabel)
+        trackAndMaybeSchedule(building: building, buffName: buffName)
+    }
+
+    // Reverse-lookup from a building to the category it belongs to. Matches
+    // the existing `groups` resolution rule — a category owns a building
+    // iff its `skinBases` contains the building's skinBase. Returns nil
+    // when the building is in an Unmapped/synthetic category (those never
+    // participate in auto-loop re-fires).
+    private func category(for building: BuildingsStore.BuildingItem) -> BuildingCategory? {
+        categoryRegistry.categories.first { $0.skinBases.contains(building.skinBase) }
+    }
+
+    // Cancels every pending re-buff Task. Called when the user turns the
+    // auto-loop off. Avoid relying on Task.isCancelled checks alone —
+    // explicit cancel + map clear prevents leaked references.
+    private func cancelAllPendingReBuffs() {
+        for (_, t) in pendingReBuffTasks { t.cancel() }
+        pendingReBuffTasks.removeAll()
     }
 
     var buildingBuffs: [BuffsStore.BuffItem] {
         buffsStore.uniqueTypes.filter { classifier.isBuildingBuff($0.buffName) }
     }
 
+    // Zone buffs are listed in their own dropdown at the top of the panel
+    // and dispatched via a separate opcode (TBD — see BuffZoneDispatch note
+    // in CLAUDE.md). Filtered out of `buildingBuffs` by the classifier so
+    // they never leak into per-row dropdowns.
+    var zoneBuffs: [BuffsStore.BuffItem] {
+        buffsStore.uniqueTypes.filter { classifier.isZoneBuff($0.buffName) }
+    }
+
+    // Returns the subset of `buildingBuffs` that is eligible for a given
+    // building category. Backs the per-row dropdown filter so a Barracks
+    // row only lists Recruiting buffs, a Gold-Mine row only lists Gold
+    // Fever (plus any workyard-generic buffs), etc. Threads both the group
+    // (coarse prefix scope) and skinBases (per-name override) through to
+    // the classifier so Step 2 restrictions (Damascene Hammer only on
+    // Weaponsmiths, etc.) take effect.
+    func buildingBuffs(for category: BuildingCategory) -> [BuffsStore.BuffItem] {
+        buffsStore.uniqueTypes.filter {
+            classifier.appliesTo(
+                buff: $0.buffName,
+                buildingGroup: category.group ?? "",
+                skinBases: category.skinBases)
+        }
+    }
+
     // Fallback for any category lacking an explicit defaultBuff.
     private static let fallbackDefaultBuff = "ProductivityBuffLvl300"
+    // Seeded for every category when visiting a friend / in an adventure.
+    // Fish Platter (ProductivityBuffLvl1) is the cheapest productivity buff —
+    // we don't want to spend premium buffs on someone else's buildings.
+    static let friendContextDefaultBuff = "ProductivityBuffLvl1"
 
     // Recognized tribute suffixes (case-insensitive). Order matters: the
     // longer `_mini_gold` must be checked first so we don't strip just
@@ -176,7 +382,12 @@ final class BuffDispatchCoordinator {
             guard selectedBuff[group.category.id] == nil else { continue }
 
             let raw: String
-            if let categoryOverride = group.category.defaultBuff {
+            if zoneContext != "home" {
+                // Friend/adventure: always default every category to Fish
+                // Platter, bypassing home's per-subgroup defaults. User can
+                // still override per-row mid-visit.
+                raw = Self.friendContextDefaultBuff
+            } else if let categoryOverride = group.category.defaultBuff {
                 raw = categoryOverride
             } else if let subgroupDisplay = panelConfig
                         .defaultBuffDisplayName(forSubgroup: group.category.displayName) {
@@ -198,48 +409,39 @@ final class BuffDispatchCoordinator {
         return buffsStore.uniqueTypes.first { $0.displayLabel == displayName }?.buffName
     }
 
-    // Apply the master selection across every visible category. Unmapped
-    // categories are left alone so the master picker can't accidentally
-    // schedule a buff against a building we don't recognize.
-    func selectMasterBuff(_ buffName: String,
-                          across snapshot: [(category: BuildingCategory, buildings: [BuildingsStore.BuildingItem])]) {
-        masterBuff = buffName
-        for group in snapshot {
-            if group.category.group == BuildingGroup.unmapped.rawValue { continue }
-            selectedBuff[group.category.id] = buffName
-        }
-    }
-
     // Dispatch the same buff stack uid to every building in the group.
     // The server decrements the stack amount on each call. Buildings already
     // carrying an active buff are skipped — the in-game UI refuses to re-buff
     // a buffed building, and the server would still consume a stack if we did
-    // it via our injection. Returned Task lets tests await completion.
+    // it via our injection. Paused buildings (production off) are also skipped:
+    // the buff would apply but produce no output. Returned Task lets tests
+    // await completion.
     @discardableResult
     func buffAll(group: [BuildingsStore.BuildingItem], buffName: String) -> Task<Void, Never>? {
         guard let buff = buffsStore.item(for: buffName) else { return nil }
-        let candidates = group.filter { $0.activeBuff == nil }
+        let candidates = group.filter { $0.activeBuff == nil && !$0.paused }
         guard !candidates.isEmpty else {
-            logger.log("[BuffAll] all \(group.count) buildings already buffed; skipping")
+            logger.log("[BuffAll] all \(group.count) buildings already buffed or paused; skipping")
             return nil
         }
         let total = candidates.count
         return bulk.run(items: candidates) { [self] i, building in
             logger.log("[BuffAll] \(i + 1)/\(total) grid=\(building.gridIndex) " +
-                       "buff=\(buff.uid1):\(buff.uid2)")
+                       "buff=\(buffName) uid=\(buff.uid1):\(buff.uid2)")
             dispatcher.dispatchBuff(
                 buffUid1: buff.uid1,
                 buffUid2: buff.uid2,
                 targetGrid: building.gridIndex)
             noteBuffDispatched(buffLabel: buff.displayLabel)
+            trackAndMaybeSchedule(building: building, buffName: buffName)
         }
     }
 
-    // Coalesces rapid-fire buff dispatches (per-category or master "Buff all")
+    // Coalesces rapid-fire buff dispatches (per-category or auto-loop sweep)
     // into a single banner that resets after `buffBannerHideDelay` seconds of
     // quiet. Mirrors `SpecialistDispatchCoordinator.noteExplorerDispatched`.
     // Shows the buff display name when a burst is homogenous; drops the
-    // label if the master dispatch mixes different buffs across categories,
+    // label if the sweep mixes different buffs across categories,
     // so the banner doesn't strobe.
     private func noteBuffDispatched(buffLabel: String) {
         buffBannerCount += 1
@@ -271,27 +473,34 @@ final class BuffDispatchCoordinator {
     // `buffAll`). Returns nil if nothing is dispatchable.
     @discardableResult
     func buffAllGroups(snapshot: [(category: BuildingCategory, buildings: [BuildingsStore.BuildingItem])]) -> Task<Void, Never>? {
-        struct Step { let building: BuildingsStore.BuildingItem; let buff: BuffsStore.BuffItem }
+        struct Step {
+            let building: BuildingsStore.BuildingItem
+            let buff: BuffsStore.BuffItem
+            let buffName: String
+        }
         var steps: [Step] = []
         for group in snapshot {
-            // Unmapped categories are excluded from the master "Buff all".
+            // Unmapped categories are excluded from the auto-loop sweep.
             if group.category.group == BuildingGroup.unmapped.rawValue { continue }
             let name = selectedBuff[group.category.id] ?? ""
             guard !name.isEmpty, let buff = buffsStore.item(for: name) else { continue }
-            for b in group.buildings where b.activeBuff == nil {
-                steps.append(Step(building: b, buff: buff))
+            for b in group.buildings where b.activeBuff == nil && !b.paused {
+                steps.append(Step(building: b, buff: buff, buffName: name))
             }
         }
         guard !steps.isEmpty else { return nil }
         let total = steps.count
         return bulk.run(items: steps) { [self] i, step in
             logger.log("[BuffAll] \(i + 1)/\(total) grid=\(step.building.gridIndex) " +
-                       "buff=\(step.buff.uid1):\(step.buff.uid2)")
+                       "buff=\(step.buffName) uid=\(step.buff.uid1):\(step.buff.uid2)")
             dispatcher.dispatchBuff(
                 buffUid1: step.buff.uid1,
                 buffUid2: step.buff.uid2,
                 targetGrid: step.building.gridIndex)
             noteBuffDispatched(buffLabel: step.buff.displayLabel)
+            trackAndMaybeSchedule(building: step.building, buffName: step.buffName)
         }
     }
 }
+
+extension BuffDispatchCoordinator: BuffZoneContextSink {}

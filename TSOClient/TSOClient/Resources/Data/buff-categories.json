@@ -1,6 +1,53 @@
 {
   "buildingBuffs": {
-    "prefixes": ["ProductivityBuff"],
+    "prefixes": [
+      "ProductivityBuff",
+      "RecruitingBuff",
+      "ProvisionerBuff",
+      "BookbinderBuff"
+    ],
     "exact":    ["RemoveBuff", "HalloweenEvent_Horror"]
+  },
+  "zoneBuffs": {
+    "prefixes": [
+      "ProductivityBuffZone",
+      "RecruitingBuffZone",
+      "MultiplierBuffZone",
+      "AnimalBuff_"
+    ],
+    "exact": []
+  },
+  "excluded": {
+    "prefixes": [
+      "ProductivityBuff_Starfall",
+      "Productivity_Starfall"
+    ],
+    "exact": []
+  },
+  "scopeByPrefix": {
+    "ProductivityBuff": { "excludeGroups": ["Barracks", "Bookbinder", "Provision House", "Coin"] },
+    "RecruitingBuff":   { "includeGroups": ["Barracks"] },
+    "BookbinderBuff":   { "includeGroups": ["Bookbinder"] },
+    "ProvisionerBuff":  { "includeGroups": ["Provision House"] }
+  },
+  "scopeByName": {
+    "ProductivityBuffBalloonDog":     { "skinBases": ["Brewery", "BreweryEndless", "Friary"] },
+    "ProductivityBuffBalloonHandful": { "skinBases": ["ProvisionHouse", "ProvisionHouse2"] },
+    "ProductivityBuffLvl9":   { "skinBases": ["Brewery", "BreweryEndless", "Friary"] },
+    "ProductivityBuffLvl15":  { "skinBases": ["Farm", "BioFarm", "ImprovedFarm"] },
+    "ProductivityBuffLvl17":  { "skinBases": ["GoldMine"] },
+    "ProductivityBuffLvl18":  { "skinBases": ["BronzeWeaponsmith", "ImprovedBronzeWeaponsmith", "IronWeaponsmith", "SteelWeaponsmith", "TitaniumWeaponsmith", "PlatinumWeaponsmith"] },
+    "ProductivityBuffLvl19":  { "skinBases": ["VillageSchool", "University", "Spa", "ClassyHotel"] },
+    "ProductivityBuffLvl25":  { "skinBases": ["Bakery", "ImprovedBakery"] },
+    "ProductivityBuffLvl100": { "skinBases": ["Farm", "BioFarm", "ImprovedFarm"] },
+    "ProductivityBuffLvl101": { "skinBases": ["Stable", "EliteStable"] },
+    "ProductivityBuffLvl106": { "skinBases": ["Fisher", "FishFarm"] },
+    "ProductivityBuffLvl108": { "skinBases": ["PumpkinCemetery"] },
+    "ProductivityBuffSunflowerFertilizer": { "skinBases": ["SunflowerFarm"] },
+    "ProductivityBuffJewelcrafter1":       { "skinBases": ["SunflowerFarm"] },
+    "ProductivityBuffCollectibleEW":       { "skinBases": ["EpicWorkyardWood"] },
+    "RecruitingBuffLvl6":   { "skinBases": ["Barracks", "Barracks3"] },
+    "RecruitingBuffLvl7":   { "skinBases": ["EliteBarracks"] },
+    "RecruitingBuffLvl300": { "skinBases": ["CombatAcademy"] }
   }
 }

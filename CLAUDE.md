@@ -15,7 +15,7 @@ A native macOS wrapper around The Settlers Online (TSO), built as an automation 
 - **Collectible Highlighter** — texture substitution renders all 55 collectible types pink in-world.
 - **Specialist Dispatch** — manual one-shot dispatch + per-kind bulk dispatch + per-row optimistic UI flip. AMF3 RPC reaches GameServer end-to-end.
 - **Specialist Auto-Loop** — Explorer loop (per-uid wake-up timer driven by predicted duration) and per-subtype Geologist loops (Stone Cold / Diligent), persisted across launches via `UserDefaults`.
-- **Buff Manager** — buff inventory + buildings panel grouped by category (Mines / Masons / Smelters / Wood / Food / Other), per-group buff selection, master "Buff all" override. Works on friend visits too — the panel repopulates with the friend's buildings and the outbound RPC carries the friend's `zoneID` (see "Zone-context gate" below).
+- **Buff Manager** — buff inventory + buildings panel grouped by category. Sections ordered **Barracks / Provision House / Bookbinder first**, then production groups (Mines / Masons / Smelters / Wood / Food / Primary Resource / Coin / Coal / Weapons / Weapon Tools / Science / Tributes / Other / Unmapped). Per-row buff dropdown is **scoped** — only shows buffs applicable to the building's group/skinBase (Barracks row shows only `RecruitingBuff*`; Bookbinder row shows only `BookbinderBuff*`; Gold Mine shows Gold Fever + any workyard-generic Productivity buffs; etc.). A separate **Zone buffs** dropdown sits at the top of the panel for `MultiplierBuffZone*` / `ProductivityBuffZone*` / `RecruitingBuffZone*` / `AnimalBuff_*` buffs (dispatch wire not yet wired — the Apply button is disabled with a tooltip until we capture the opcode). The old master "Override all groups" row was removed — per-row selections stand on their own. Works on friend visits too — the panel repopulates with the friend's buildings and the outbound RPC carries the friend's `zoneID` (see "Zone-context gate" below). Home vs friend buff selections are kept **separate**: the home map is persisted; the friend map is in-memory only and seeds every category to Fish Platter (`ProductivityBuffLvl1`) so a quick visit doesn't burn through premium stacks.
 - **Player buff auto-detection** — Prestigious Friend Buff (PFB, ×0.8 task time) detected from `dZoneVO.zoneBuffs` and folded into every duration estimate.
 - **Idle sleep inhibitor** — keeps the app awake while auto-loops run (`ProcessInfo.beginActivity`).
 
@@ -25,6 +25,9 @@ A native macOS wrapper around The Settlers Online (TSO), built as an automation 
 
 - `amf-vo-keys.md` — captured key reference for `dPlayerVO` and `dZoneVO` (the two top-level VOs on every zone-load response). Consult before adding features that need zone-level data instead of re-deriving from a fresh capture.
 - `building-skins.md` — canonical raw `skin` strings used by `building-categories.json`.
+- `cdn-xml-catalog.md` — catalog of the 25 startup-fetched `GFX_HASHED/*.xml` files; records which carry buff/building data and which don't. Consult before enabling `_tsoNetLog` to re-discover endpoints.
+- `amf-boot-audit.md` — AMF opcodes + VO classes observed at cold boot; records the verdict that **no server-side definitions endpoint exists**. The 1002 ack is player state (6.35 MB), not a catalog. Buff durations live in the Unity `.data` bundle.
+- `buff-catalog.md` — community-sourced buff catalog (~65 buffs: raw name → display → duration → effect → scope). Primary source is `en.tsomaps.com`; secondary is `settlersonlinewiki.eu`.
 
 ## Where to find things
 
@@ -153,7 +156,7 @@ Injection order is dependency-ordered; everything runs at `atDocumentStart`.
 - `COLLECTIBLES`  — `{mapWidth, mapHeight, items:[{gridIndex,x,y,assetName}]}`
 - `GAME_STATE`    — `{state:"LOADED"|"ZONE_CHANGED"|"ZONE_LEFT", zoneId?}`
 - `SPECIALISTS`   — `{items:[{uid,uid1,uid2,specialistType,subTypeId,subTypeName?,name,isIdle,skills,collectedTime?,bonusTime?,taskEndTime?,taskActionType?,taskSubTaskID?}], playerLevel?}`
-- `BUILDINGS`     — `{items:[{gridIndex,skin,uid1,uid2,activeBuff?}]}`
+- `BUILDINGS`     — `{items:[{gridIndex,skin,uid1,uid2,activeBuff?,activeBuffApplianceMode?,paused?}]}`. `activeBuffApplianceMode` is the server's duration-tier enum captured from `dBuffApplianceVO.applianceMode` (0 = self on own building; higher values unconfirmed). Threaded through so `BuffDurationLearner` can key on `(buffName, applianceMode)` instead of averaging modes together.
 - `BUFFS`         — `{items:[{uid1,uid2,buffName,resourceName,amount,insertedAt}]}`
 - `PLAYER_BUFFS`  — `{pfbActive: bool}` (auto-detected from `dZoneVO.zoneBuffs`)
 - `ZONE_CONTEXT`  — `{context: "home"|"friend"|"adventure", zoneId?}` (emitted on every context transition; `ZoneContextHandler` wipes `SpecialistsStore` + `CollectiblesStore` when `context != "home"` so the buff panel can operate on friend-zone buildings without a stale specialist snapshot showing dispatch buttons)
@@ -247,6 +250,40 @@ The geologist counterpart `geologist-durations.json` covers base durations for e
 
 Strategies are registered by id (`auto-loop-explorer`, `auto-loop-geologist-<subTypeId>`); `runAutoExplorerLoop()` / `runAutoGeologistLoop()` are thin facades that look the strategy up. Adding a new auto-loop kind = new conformer + register call. Toggle state is persisted via `KeyValueStore`.
 
+## Buff categorization & scope
+
+`buff-categories.json` is the single data-driven source for every "what buffs show where" decision. Four top-level sections:
+
+```
+{
+  "buildingBuffs":  { "prefixes": [...], "exact": [...] },  // what counts as a building buff
+  "zoneBuffs":      { "prefixes": [...], "exact": [...] },  // zone-wide buffs (separate dropdown)
+  "excluded":       { "prefixes": [...], "exact": [...] },  // quest/story items — hidden entirely
+  "scopeByPrefix":  { "<prefix>": { "includeGroups": [...] | "excludeGroups": [...] } },
+  "scopeByName":    { "<rawName>": { "skinBases": [...] } }
+}
+```
+
+Classifier logic (`BuffCategoryClassifier`):
+- `isBuildingBuff(name)` — true iff matches `buildingBuffs` AND NOT matches `zoneBuffs` AND NOT matches `excluded`. Prefix overlap (`ProductivityBuffZoneWoodLvl1` matches both building and zone prefix tables) resolves to zone.
+- `isZoneBuff(name)` — matches `zoneBuffs` AND NOT `excluded`.
+- `appliesTo(buff:buildingGroup:skinBases:)` — the per-row dropdown filter. Resolution:
+  1. Reject non-building-buffs.
+  2. **Per-name override wins** — if `scopeByName[buff]` exists, require skinBase overlap (ignores prefix rule).
+  3. Else longest-matching `scopeByPrefix[prefix]` — allow iff `includeGroups`/`excludeGroups` permits.
+  4. No rule → allow (new buff families don't vanish silently).
+
+Shipped scope rules (as of 2026-11-22):
+- **scopeByPrefix**: `ProductivityBuff` excludes Barracks/Bookbinder/Provision House/Coin; `RecruitingBuff` → Barracks; `BookbinderBuff` → Bookbinder; `ProvisionerBuff` → Provision House.
+- **scopeByName**: ~17 entries covering every catalog-confirmed specialty — Gold Fever only on GoldMine; Damascene Hammer on all 5 Weaponsmith tiers; Mother Tree / Helpful Scarecrow / Harvest Ritual only on Farms; Hot Lemon Tea on Village School / University / Spa / Classy Hotel; Mountain Climbing (Lvl6) only on regular Barracks; Ice Swimming (Lvl7) only on Elite Barracks; Sunflower Fertilizer / Jewelcrafter1 only on SunflowerFarm; Master's Toolkit only on EpicWorkyardWood; Balloon Dog on Brewery/Friary; Handful of Balloons on Provision House.
+- **excluded**: `ProductivityBuff_Starfall*` / `Productivity_Starfall*` quest items stripped from both dropdowns.
+
+`buff-catalog.md` is the data source for scope + duration + effect, plus the **Observed buffID ↔ raw name** table that pins each numeric `dBuffApplianceVO.buffID` to its raw name (populated by the `[BuffAll] buff=<raw> grid=X` dispatch log paired with the next `[Buff:applied] grid=X buffID=N` scanner event — see "JS debugging" for the workflow).
+
+## Buff duration learning
+
+`BuffDurationLearner` observes the game's own BUILDINGS payloads to learn per-buff durations without hitting a server-side definitions endpoint (which doesn't exist — `amf-boot-audit.md`). Rekeyed from v1 (`[buffName: duration]`) to v2 (`[buffName|applianceMode: duration]`) in 2026-11-22 because the same raw name has different server-side durations depending on `dBuffApplianceVO.applianceMode` (self vs friend vs PFB-boosted). Lookup fallback chain: exact `(name, mode)` hit → any-mode bucket (`name|*`) → max across all observed modes. Legacy v1 keys are migrated into the any-mode bucket on first load — one-way migration, old data not deleted so downgrading doesn't lose samples. `logSnapshot()` fires after every new learn so tailing `latest.log` doubles as a progress monitor.
+
 ## Collectibles & highlighting
 
 Highlighting uses **texture substitution**: `collectible-patcher.js` intercepts `fetch()` and `XMLHttpRequest` calls for collectible building PNG textures (matched by SHA-1 hash against the 55-entry list in `collectible-hashes.json`, sourced from `perceptron8/pinky.ext` `live.json`) and returns a synthetic 32×32 hot-pink PNG. Unity uploads the substituted bytes as a GL texture and renders the collectible pink in-world. No overlay canvas, no calibration, no camera tracking needed.
@@ -331,6 +368,13 @@ What was tried (module deleted 2026-07-12 — recon complete):
 - **Entitlements / plist issues** surface at signing time, not compile time — check `TSOClient.entitlements` and `Info.plist` directly if the app crashes at launch.
 - **JS debugging**: add `webkit.messageHandlers.logger.postMessage(...)` calls freely; they stream to Xcode console with `[JS]` prefix. Or set `window._tsoDiag = true` from Safari Web Inspector to enable the gated `_tsoDiagLog` traces. Never remove the `"logger"` handler registration.
 - **JS files**: edit `Resources/JS/*.js` directly. No recompile needed to change JS logic — only a re-run.
+- **File log**: `FileLogger` (`Utilities/Logger.swift`) mirrors every log line to `~/Library/Containers/sleepyTown.TSOClient/Data/Library/Logs/TSOClient/latest.log` so you can `tail -f` from a terminal. Truncated per launch. **Test-host sidecar**: when the process is spawned by `xcodebuild test` (detected via `XCTestConfigurationFilePath`), output routes to `tests.log` instead — a test run no longer clobbers a live `latest.log`.
+- **Buff-seeding workflow** — pinning `buffID ↔ raw name` from live play:
+  1. Apply the buff to an unbuffed building **via our panel** (the `[BuffAll] 1/1 grid=X buff=<rawName>` log line pins the dispatched name).
+  2. Trigger a zone reload (visit a friend and come back — the scanner only emits full BUILDINGS on zone-load).
+  3. Grep `latest.log` for `[Buff:applied] grid=X` — same grid, now carrying the server-assigned `buffID=N` + `applianceMode=M`.
+  4. Record the pair in `buff-catalog.md` under "Observed buffID ↔ raw name".
+  Other scanner diagnostics: `[Buff:mode-first-seen]` (once per `(buffID, mode)` pair per session), `[Buff:cleared]` (buff dropped off a grid since last home scan), `[BuffInventory] names=…` (one-shot per session, dumps every raw-name in inventory). The delta tracker only operates on home scans — friend/adventure visits don't touch the baseline so the diff on return home is clean.
 
 ## Testing & CI
 
@@ -407,5 +451,7 @@ Match the change to a row. If a row says "must," CI passes without the test but 
 - **In-game UI refresh on injected dispatch** — structural Unity limitation (see "Unity UI refresh dead end"). Mitigated by optimistic UI in our own panel.
 - **Geologist bonus for Lovely (40)** — `timeBonus` is `null` in `geologist-durations.json`. Auto-loop for Lovely falls back to the learner's observed duration. Populate by observation and cross-reference with `[GeologistDuration]` divergence logs. Diligent, Chummy, and Titanic are pinned as of 2026-08-14 — see "Duration estimation" for the bonus shape.
 - **General dispatch auto-populated `garrisonBuildingGridPos`** — value is on `dSpecialistVO` but not threaded into `SpecialistItem`; user enters grid manually.
+- **Zone-buff dispatch.** The classifier identifies zone buffs correctly and surfaces them in a dedicated dropdown at the top of the panel, but the Apply button is disabled — we haven't captured the server opcode / VO shape for zone-buff application. Workflow to capture: enable `window._tsoDiag = true` in Safari Web Inspector, apply a zone buff in-game, grep `latest.log` for the outbound body.
+- **Buff scope pinning for new `ProductivityBuff*` variants in inventory.** Known gaps: `ProductivityBuffLvl20/21/24/27/28/102/104/105/107`, `ProductivityBuffEW1/2`, `ProductivityBuffJewelcrafter2`, `ProductivityBuffToyFactoryBuff3`. These pass through the dropdown as generic workyard buffs (because no `scopeByName` override exists) — fine as a default but imprecise. Add `scopeByName` entries as scope info becomes available on the wiki or via observation.
 - **Adventure features, trading, building/production automation.**
 - **UI tests.** Unit tests exist (`TSOClientTests/`); no UI/integration target.

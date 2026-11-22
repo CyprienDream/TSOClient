@@ -81,12 +81,19 @@ function specVO({ uid1 = 1, uid2 = 2, name = 'Hans' }) {
 
 // Stand-in dBuildingVO carrying a buildingGrid — only used to defeat the
 // "no game-world data" early-skip on incremental updates that have no dZoneVO.
-function buildingVO({ grid = 100 } = {}) {
-    return {
+function buildingVO({ grid = 100, buffs = null } = {}) {
+    const out = {
         __class: FQN('dBuildingVO'),
         buildingGrid: grid,
         skin: 'Warehouse',
     };
+    if (buffs) {
+        out.buffs = {
+            __class: 'flex.messaging.io.ArrayCollection',
+            source: buffs,
+        };
+    }
+    return out;
 }
 
 function envelope(...nodes) {
@@ -299,6 +306,166 @@ describe('amf3-scanner home-zone gate', () => {
         const b = buildingsEmits(s);
         expect(b).toHaveLength(1);
         expect(b[0].payload.items[0].gridIndex).toBe(100);
+    });
+
+    it('surfaces activeBuff and activeBuffApplianceMode from dBuffApplianceVO', () => {
+        // The learner keys on (buffName, applianceMode); both fields must
+        // pass through to Swift. Mode comes from dBuffApplianceVO.applianceMode.
+        const s = buildScannerSandbox();
+        s.analyze(envelope(
+            zoneVO({ owner: 1, visitor: 1 }),
+            buildingVO({
+                grid: 100,
+                buffs: [{
+                    __class: FQN('dBuffApplianceVO'),
+                    buffName_string: 'ProductivityBuffLvl3',
+                    buffID: 42,
+                    applianceMode: 2,
+                }],
+            })
+        ));
+        const b = buildingsEmits(s);
+        expect(b).toHaveLength(1);
+        const item = b[0].payload.items[0];
+        expect(item.activeBuff).toBe('ProductivityBuffLvl3');
+        expect(item.activeBuffApplianceMode).toBe(2);
+    });
+
+    it('leaves activeBuffApplianceMode null when the appliance has no mode field', () => {
+        const s = buildScannerSandbox();
+        s.analyze(envelope(
+            zoneVO({ owner: 1, visitor: 1 }),
+            buildingVO({
+                grid: 100,
+                buffs: [{
+                    __class: FQN('dBuffApplianceVO'),
+                    buffName_string: 'ProductivityBuffLvl3',
+                    buffID: 42,
+                }],
+            })
+        ));
+        const item = buildingsEmits(s)[0].payload.items[0];
+        expect(item.activeBuff).toBe('ProductivityBuffLvl3');
+        expect(item.activeBuffApplianceMode).toBeNull();
+    });
+
+    // ── Geologist task completion push (mode=160 dFoundDepositVO) ────────
+
+    function foundDepositVO({ uid1, uid2, resource = 'IronOre', gridIdx = 100,
+                              amount = 500, maxAmount = 500, extras = [] }) {
+        return {
+            __class: FQN('UpdateVO.dFoundDepositVO'),
+            specialistID: {
+                __class: FQN('dUniqueID'),
+                uniqueID1: uid1, uniqueID2: uid2,
+            },
+            depositVO: {
+                __class: FQN('dDepositVO'),
+                gridIdx, name_string: resource, amount, maxAmount,
+            },
+            exploredDepositResult: 1,
+            extraDeposits_vector: {
+                __class: 'flex.messaging.io.ArrayCollection',
+                source: extras.map((ex) => ({
+                    __class: FQN('UpdateVO.dFoundDepositVO'),
+                    specialistID: {
+                        __class: FQN('dUniqueID'),
+                        uniqueID1: uid1, uniqueID2: uid2,
+                    },
+                    depositVO: {
+                        __class: FQN('dDepositVO'),
+                        gridIdx: ex.gridIdx, name_string: ex.resource ?? resource,
+                        amount: ex.amount ?? amount, maxAmount: ex.maxAmount ?? maxAmount,
+                    },
+                    extraDeposits_vector: {
+                        __class: 'flex.messaging.io.ArrayCollection', source: [],
+                    },
+                    depositSearchedFor: null,
+                })),
+            },
+            depositSearchedFor: resource,
+        };
+    }
+
+    function type1004Envelope(...cmdData) {
+        return [{
+            value: [{
+                body: {
+                    __class: FQN('dServerResponse'),
+                    type: 1004,
+                    data: {
+                        __class: FQN('dServerActionResult'),
+                        errorCode: 0,
+                        data: {
+                            __class: 'flex.messaging.io.ArrayCollection',
+                            source: cmdData.map((cd) => ({
+                                __class: FQN('dGameTickCommandVO'),
+                                mode: cd.mode,
+                                data: cd.data,
+                            })),
+                        },
+                    },
+                },
+            }],
+        }];
+    }
+
+    it('emits SPECIALIST_TASK_COMPLETED for a single mode=160 dFoundDepositVO push', () => {
+        const s = buildScannerSandbox();
+        // Prime home context — the scanner's type=1004 branch runs regardless
+        // of zone context (completion pushes aren't gated), but the pipeline
+        // needs a first walk to establish sane state.
+        s.analyze(envelope(zoneVO({ owner: 1, visitor: 1 })));
+        s.analyze(type1004Envelope({
+            mode: 160,
+            data: foundDepositVO({ uid1: 27678, uid2: 0, gridIdx: 7356 }),
+        }));
+        const completed = s.sends.filter((e) => e.type === 'SPECIALIST_TASK_COMPLETED');
+        expect(completed).toHaveLength(1);
+        expect(completed[0].payload.items).toEqual([{
+            uid: '27678:0', uid1: 27678, uid2: 0,
+            kind: 'geologist', searchedFor: 'IronOre',
+            deposits: [{ gridIndex: 7356, resource: 'IronOre', amount: 500, maxAmount: 500 }],
+        }]);
+    });
+
+    it('flattens extraDeposits_vector into a single deposits[] array on one item', () => {
+        const s = buildScannerSandbox();
+        s.analyze(envelope(zoneVO({ owner: 1, visitor: 1 })));
+        s.analyze(type1004Envelope({
+            mode: 160,
+            data: foundDepositVO({
+                uid1: 27678, uid2: 0, gridIdx: 7356,
+                extras: [{ gridIdx: 2078, amount: 550, maxAmount: 550 }],
+            }),
+        }));
+        const item = s.sends.find((e) => e.type === 'SPECIALIST_TASK_COMPLETED').payload.items[0];
+        expect(item.deposits).toHaveLength(2);
+        expect(item.deposits[0].gridIndex).toBe(7356);
+        expect(item.deposits[1].gridIndex).toBe(2078);
+        expect(item.deposits[1].amount).toBe(550);
+    });
+
+    it('emits one item per dGameTickCommandVO when several geologists finish on the same tick', () => {
+        const s = buildScannerSandbox();
+        s.analyze(envelope(zoneVO({ owner: 1, visitor: 1 })));
+        s.analyze(type1004Envelope(
+            { mode: 160, data: foundDepositVO({ uid1: 27678, uid2: 0, gridIdx: 7356 }) },
+            { mode: 160, data: foundDepositVO({ uid1: 56125, uid2: 0, gridIdx: 8151 }) },
+        ));
+        const completed = s.sends.filter((e) => e.type === 'SPECIALIST_TASK_COMPLETED');
+        expect(completed).toHaveLength(1);
+        expect(completed[0].payload.items.map((it) => it.uid)).toEqual(['27678:0', '56125:0']);
+    });
+
+    it('ignores dGameTickCommandVO items with modes other than 160', () => {
+        const s = buildScannerSandbox();
+        s.analyze(envelope(zoneVO({ owner: 1, visitor: 1 })));
+        s.analyze(type1004Envelope(
+            { mode: 95, data: { __class: FQN('dServerAction') } },   // dispatch ack
+            { mode: 1062, data: null },                              // trade push
+        ));
+        expect(s.sends.filter((e) => e.type === 'SPECIALIST_TASK_COMPLETED')).toHaveLength(0);
     });
 
     it('captures dZoneVO.zoneID into window._tsoCurrentZoneID', () => {

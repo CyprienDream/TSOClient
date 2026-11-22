@@ -58,9 +58,34 @@ struct NamingRegistryTests {
 struct BuffCategoryClassifierTests {
     private let classifier = BuffCategoryClassifier(rules: [
         .buildingBuffs: BuffCategoryClassifier.Rule(
-            prefixes: ["ProductivityBuff"],
+            prefixes: ["ProductivityBuff", "RecruitingBuff", "BookbinderBuff"],
             exact:    ["RemoveBuff", "HalloweenEvent_Horror"]
+        ),
+        .zoneBuffs: BuffCategoryClassifier.Rule(
+            prefixes: ["ProductivityBuffZone", "RecruitingBuffZone", "MultiplierBuffZone"],
+            exact:    []
         )
+    ], scopeByPrefix: [
+        "ProductivityBuff": BuffCategoryClassifier.Scope(
+            includeGroups: nil,
+            excludeGroups: ["Barracks", "Bookbinder", "Provision House", "Coin"]
+        ),
+        "RecruitingBuff": BuffCategoryClassifier.Scope(
+            includeGroups: ["Barracks"],
+            excludeGroups: nil
+        ),
+        "BookbinderBuff": BuffCategoryClassifier.Scope(
+            includeGroups: ["Bookbinder"],
+            excludeGroups: nil
+        )
+    ], scopeByName: [
+        "ProductivityBuffLvl17": BuffCategoryClassifier.NameScope(skinBases: ["GoldMine"]),
+        "ProductivityBuffLvl18": BuffCategoryClassifier.NameScope(skinBases: [
+            "BronzeWeaponsmith", "IronWeaponsmith", "SteelWeaponsmith",
+            "TitaniumWeaponsmith", "PlatinumWeaponsmith"
+        ]),
+        "RecruitingBuffLvl6": BuffCategoryClassifier.NameScope(skinBases: ["Barracks", "Barracks3"]),
+        "RecruitingBuffLvl7": BuffCategoryClassifier.NameScope(skinBases: ["EliteBarracks"])
     ])
 
     @Test func exactMatch() {
@@ -83,6 +108,100 @@ struct BuffCategoryClassifierTests {
         let empty = BuffCategoryClassifier.empty
         #expect(!empty.isBuildingBuff("ProductivityBuffLvl3"))
         #expect(!empty.isBuildingBuff("RemoveBuff"))
+    }
+
+    @Test func zoneBuffsDetectedSeparately() {
+        #expect(classifier.isZoneBuff("ProductivityBuffZoneWoodLvl1"))
+        #expect(classifier.isZoneBuff("RecruitingBuffZoneLvl3"))
+        #expect(classifier.isZoneBuff("MultiplierBuffZone2_PremiumFriendBuff1Day"))
+        #expect(!classifier.isZoneBuff("ProductivityBuffLvl3"))
+        #expect(!classifier.isZoneBuff("RecruitingBuffLvl5"))
+    }
+
+    @Test func zoneBuffsExcludedFromBuildingBuffs() {
+        // Prefix overlap: `ProductivityBuffZoneWoodLvl1` matches the
+        // `ProductivityBuff` building-prefix *and* the `ProductivityBuffZone`
+        // zone-prefix. Zone wins — the per-building dropdown must not list it.
+        #expect(!classifier.isBuildingBuff("ProductivityBuffZoneWoodLvl1"))
+        #expect(!classifier.isBuildingBuff("RecruitingBuffZoneLvl3"))
+    }
+
+    @Test func productivityBuffExcludedFromBarracks() {
+        // Productivity buffs must not appear in Barracks / Bookbinder /
+        // Provision House dropdowns — those are special-purpose groups.
+        #expect(!classifier.appliesTo(buff: "ProductivityBuffLvl3", buildingGroup: "Barracks", skinBases: ["Barracks"]))
+        #expect(!classifier.appliesTo(buff: "ProductivityBuffLvl3", buildingGroup: "Bookbinder", skinBases: ["Bookbinder"]))
+        #expect(!classifier.appliesTo(buff: "ProductivityBuffLvl3", buildingGroup: "Provision House", skinBases: ["ProvisionHouse"]))
+        #expect(classifier.appliesTo(buff: "ProductivityBuffLvl3", buildingGroup: "Wood", skinBases: ["WoodCutter"]))
+        #expect(classifier.appliesTo(buff: "ProductivityBuffLvl3", buildingGroup: "Mines", skinBases: ["IronMine"]))
+    }
+
+    @Test func recruitingBuffOnlyInBarracks() {
+        #expect(classifier.appliesTo(buff: "RecruitingBuffLvl1", buildingGroup: "Barracks", skinBases: ["Barracks"]))
+        #expect(!classifier.appliesTo(buff: "RecruitingBuffLvl1", buildingGroup: "Wood", skinBases: ["WoodCutter"]))
+        #expect(!classifier.appliesTo(buff: "RecruitingBuffLvl1", buildingGroup: "Bookbinder", skinBases: ["Bookbinder"]))
+    }
+
+    @Test func bookbinderBuffOnlyInBookbinder() {
+        #expect(classifier.appliesTo(buff: "BookbinderBuffLvl1", buildingGroup: "Bookbinder", skinBases: ["Bookbinder"]))
+        #expect(!classifier.appliesTo(buff: "BookbinderBuffLvl1", buildingGroup: "Barracks", skinBases: ["Barracks"]))
+    }
+
+    @Test func zoneBuffNeverAppliesToAnyBuilding() {
+        #expect(!classifier.appliesTo(buff: "ProductivityBuffZoneWoodLvl1", buildingGroup: "Wood", skinBases: ["WoodCutter"]))
+    }
+
+    @Test func unknownPrefixDefaultsToAllowAll() {
+        // A building buff without a scope rule shouldn't vanish from the UI —
+        // better to show it in every row than hide it silently.
+        #expect(classifier.appliesTo(buff: "RemoveBuff", buildingGroup: "Barracks", skinBases: ["Barracks"]))
+        #expect(classifier.appliesTo(buff: "RemoveBuff", buildingGroup: "Wood", skinBases: ["WoodCutter"]))
+    }
+
+    @Test func perNameSkinBaseOverrideWins() {
+        // Gold Fever is Productivity-prefixed (so prefix scope would allow
+        // every workyard group), but the per-name override restricts it to
+        // Gold Mine only. The override must bypass the prefix rule entirely.
+        #expect(classifier.appliesTo(buff: "ProductivityBuffLvl17", buildingGroup: "Mines", skinBases: ["GoldMine"]))
+        #expect(!classifier.appliesTo(buff: "ProductivityBuffLvl17", buildingGroup: "Mines", skinBases: ["IronMine"]))
+        #expect(!classifier.appliesTo(buff: "ProductivityBuffLvl17", buildingGroup: "Wood", skinBases: ["WoodCutter"]))
+    }
+
+    @Test func damasceneHammerShowsOnEveryWeaponsmith() {
+        let weaponsmiths = ["BronzeWeaponsmith", "IronWeaponsmith",
+                            "SteelWeaponsmith", "TitaniumWeaponsmith",
+                            "PlatinumWeaponsmith"]
+        for s in weaponsmiths {
+            #expect(classifier.appliesTo(buff: "ProductivityBuffLvl18", buildingGroup: "Weapons", skinBases: [s]))
+        }
+        #expect(!classifier.appliesTo(buff: "ProductivityBuffLvl18", buildingGroup: "Weapons", skinBases: ["Crossbowsmith"]))
+    }
+
+    @Test func recruitingLvl6SplitsBarracksVsElite() {
+        // Mountain Climbing is Barracks-only (no Elite).
+        #expect(classifier.appliesTo(buff: "RecruitingBuffLvl6", buildingGroup: "Barracks", skinBases: ["Barracks"]))
+        #expect(!classifier.appliesTo(buff: "RecruitingBuffLvl6", buildingGroup: "Barracks", skinBases: ["EliteBarracks"]))
+        // Ice Swimming is Elite-only.
+        #expect(classifier.appliesTo(buff: "RecruitingBuffLvl7", buildingGroup: "Barracks", skinBases: ["EliteBarracks"]))
+        #expect(!classifier.appliesTo(buff: "RecruitingBuffLvl7", buildingGroup: "Barracks", skinBases: ["Barracks"]))
+    }
+
+    @Test func excludedBuffsHiddenFromEveryCategory() {
+        // Starfall quest items ride the ProductivityBuff family but should
+        // never show up in the UI. The `excluded` rule must strip them from
+        // both isBuildingBuff and isZoneBuff.
+        let withExclusion = BuffCategoryClassifier(rules: [
+            .buildingBuffs: BuffCategoryClassifier.Rule(
+                prefixes: ["ProductivityBuff"], exact: []),
+            .zoneBuffs: BuffCategoryClassifier.Rule(
+                prefixes: ["ProductivityBuffZone"], exact: []),
+            .excluded: BuffCategoryClassifier.Rule(
+                prefixes: ["ProductivityBuff_Starfall"], exact: [])
+        ], scopeByPrefix: [:], scopeByName: [:])
+        #expect(!withExclusion.isBuildingBuff("ProductivityBuff_StarfallStarExtractor_Buff2"))
+        #expect(!withExclusion.isZoneBuff("ProductivityBuff_StarfallStarExtractor_Buff2"))
+        // Non-excluded members of the same prefix family still pass.
+        #expect(withExclusion.isBuildingBuff("ProductivityBuffLvl3"))
     }
 }
 
