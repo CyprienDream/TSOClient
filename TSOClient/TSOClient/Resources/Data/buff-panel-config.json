@@ -1,7 +1,7 @@
 {
   "subgroups": {
     "Stone Mason":                 "Aunt Irma's Feast",
-    "Granite Mason":               "Aunt Irma's Feast",
+    "Granite Mason":               "Stadium Snacks",
     "Marble Mason":                "Aunt Irma's Feast",
 
     "Copper Mine":                 "Aunt Irma's Feast",
@@ -13,9 +13,9 @@
 
     "Copper Smelter":              "Aunt Irma's Feast",
     "Iron Smelter":                "Aunt Irma's Feast",
-    "Gold Smelter":                "Aunt Irma's Feast",
-    "Platinum Smelter":            "Aunt Irma's Feast",
-    "Steel Smelter":               "Aunt Irma's Feast",
+    "Gold Smelter":                "",
+    "Platinum Smelter":            "",
+    "Steel Smelter":               "",
     "Titanium Smelter":            "Aunt Irma's Feast",
 
     "Pinewood Cutter":             "",
@@ -49,6 +49,7 @@
 
     "Fisherman":                   "Aunt Irma's Feast",
     "Fish Farm":                   "Aunt Irma's Feast",
+    "Bio Farm":                   "Aunt Irma's Feast",
     "Hunter":                      "Aunt Irma's Feast",
     "Deerstalker Hut":             "Aunt Irma's Feast",
     "Watermill":                   "Aunt Irma's Feast",
@@ -68,11 +69,11 @@
     "Elite Barracks":              "",
 
     "Bronze Weaponsmith":          "",
-    "Improved Bronze Weaponsmith": "Aunt Irma's Feast",
+    "Improved Bronze Weaponsmith": "",
     "Iron Weaponsmith":            "",
     "Steel Weaponsmith":           "",
     "Titanium Weaponsmith":        "",
-    "Platinum Weaponsmith":        "Aunt Irma's Feast",
+    "Platinum Weaponsmith":        "",
     "Archebuse Maker":             "",
     "Cannon Forge":                "",
     "Carpenter":                   "",

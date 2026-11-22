@@ -20,7 +20,24 @@ struct AppEnvironment {
     let tradeCoordinator: TradeCoordinator
     let logger: Logger
 
-    init(logger: Logger = ConsoleLogger(),
+    // Tees ConsoleLogger (Xcode console / unified log) and FileLogger (tailable
+    // file under the sandbox container's Library/Logs/TSOClient/latest.log).
+    // Cached as a static so the FileLogger is created exactly once per
+    // process: a default-parameter factory would evaluate on every
+    // AppEnvironment() construction, and SwiftUI builds View structs (hence
+    // their @State initial values) multiple times — later constructions would
+    // truncate the file and leave handlers from earlier constructions writing
+    // to a closed FileHandle (swallowed by `try?`).
+    static let defaultLogger: Logger = {
+        let file = FileLogger()
+        let tee = TeeLogger(loggers: [ConsoleLogger(), file])
+        if let url = file.fileURL {
+            tee.log("[FileLogger] writing to \(url.path)")
+        }
+        return tee
+    }()
+
+    init(logger: Logger = AppEnvironment.defaultLogger,
          naming: NamingRegistry = .default,
          buffCategoryClassifier: BuffCategoryClassifier = .default) {
         self.logger = logger
@@ -54,7 +71,10 @@ struct AppEnvironment {
         inbound.register(CollectiblesHandler(store: collectibles))
         inbound.register(SpecialistsHandler(
             store: specialists, autoLoop: specialistDispatch, logger: logger))
-        inbound.register(BuildingsHandler(store: buildings, logger: logger))
+        inbound.register(SpecialistTaskCompletedHandler(
+            store: specialists, autoLoop: specialistDispatch, logger: logger))
+        // BuildingsHandler registered below, after buffDispatch exists — it
+        // needs the coordinator as its BuffsAutoLoopRunner.
         inbound.register(BuffsHandler(store: buffs, logger: logger))
         inbound.register(PlayerBuffsHandler(store: specialists, logger: logger))
         inbound.register(FriendsHandler(store: recipients, logger: logger))
@@ -65,22 +85,29 @@ struct AppEnvironment {
             stores: [collectibles, specialists, buildings, buffs, publicTrades],
             logger: logger
         ))
-        // Buff panel activates on friend visits: BUILDINGS + BUFFS keep
-        // flowing so the friend's buildings + our inventory populate, but
-        // specialists and collectibles get wiped so their panels don't show
-        // stale home data. See CLAUDE.md "Zone-context gate".
-        inbound.register(ZoneContextHandler(
-            offHomeStoresToClear: [specialists, collectibles],
-            logger: logger
-        ))
-        self.inbound = inbound
 
-        self.buffDispatch = BuffDispatchCoordinator(
+        let buffDispatch = BuffDispatchCoordinator(
             buffsStore: buffs,
             buildingsStore: buildings,
             dispatcher: sender,
             classifier: buffCategoryClassifier,
             bulk: BulkDispatcher(interCallDelayNs: 200_000_000),
-            logger: logger)
+            logger: logger,
+            defaults: UserDefaultsKeyValueStore())
+        self.buffDispatch = buffDispatch
+        // Buff panel activates on friend visits: BUILDINGS + BUFFS keep
+        // flowing so the friend's buildings + our inventory populate, but
+        // specialists and collectibles get wiped so their panels don't show
+        // stale home data. See CLAUDE.md "Zone-context gate". The
+        // coordinator also gets notified so it can swap its per-category
+        // buff selection map (home ↔ friend).
+        inbound.register(ZoneContextHandler(
+            offHomeStoresToClear: [specialists, collectibles],
+            buffContext: buffDispatch,
+            logger: logger
+        ))
+        inbound.register(BuildingsHandler(
+            store: buildings, autoLoop: buffDispatch, logger: logger))
+        self.inbound = inbound
     }
 }

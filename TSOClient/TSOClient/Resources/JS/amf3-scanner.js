@@ -269,6 +269,52 @@
         };
     }
 
+    // ── Deposit-find (dFoundDepositVO) normalizer ─────────────────────────
+    // Server-authoritative geologist completion push. Wire shape:
+    //   dFoundDepositVO {
+    //     specialistID:          dUniqueID{ uniqueID1, uniqueID2 },
+    //     depositVO:             dDepositVO{ gridIdx, name_string, amount, maxAmount, ... },
+    //     exploredDepositResult: number,
+    //     extraDeposits_vector:  ArrayCollection<dFoundDepositVO>,  // bonus finds
+    //     depositSearchedFor:    string   // e.g. "IronOre" — the task target
+    //   }
+    // The extra deposits share the same specialistID as the parent, so we
+    // flatten (parent + extras) into a single `deposits[]` array on one item.
+    function depositSummary(dep) {
+        if (!dep) return null;
+        return {
+            gridIndex: (typeof dep.gridIdx === 'number') ? dep.gridIdx : -1,
+            resource:  (typeof dep.name_string === 'string') ? dep.name_string : '',
+            amount:    (typeof dep.amount === 'number') ? dep.amount : 0,
+            maxAmount: (typeof dep.maxAmount === 'number') ? dep.maxAmount : 0,
+        };
+    }
+    function foundDepositToItem(found) {
+        var sid = found && found.specialistID;
+        var u1 = (sid && typeof sid.uniqueID1 === 'number') ? sid.uniqueID1 : null;
+        var u2 = (sid && typeof sid.uniqueID2 === 'number') ? sid.uniqueID2 : null;
+        if (u1 === null || u2 === null) return null;
+        var deposits = [];
+        var main = depositSummary(found.depositVO);
+        if (main) deposits.push(main);
+        var extras = unwrapCollection(found.extraDeposits_vector);
+        for (var ei = 0; ei < extras.length; ei++) {
+            var ex = extras[ei];
+            if (ex && ex.depositVO) {
+                var s = depositSummary(ex.depositVO);
+                if (s) deposits.push(s);
+            }
+        }
+        return {
+            uid: u1 + ':' + u2,
+            uid1: u1,
+            uid2: u2,
+            kind: 'geologist',
+            searchedFor: (typeof found.depositSearchedFor === 'string') ? found.depositSearchedFor : '',
+            deposits: deposits,
+        };
+    }
+
     // ── PFB (Prestigious Friend Buff) auto-detection ─────────────────────
     // Internal asset family: MultiplierBuffZone2_PremiumFriendBuff*.
     // The active-buff vector field name isn't known yet — we scan every
@@ -642,6 +688,39 @@
                             }
                         }
 
+                        // SPECIALIST_TASK_COMPLETED: geologist deposit-find push.
+                        // `dGameTickCommandVO { mode: 160, data: dFoundDepositVO }`
+                        // rides on a type=1004 heartbeat envelope. One 1004
+                        // envelope can bundle several (one per geologist that
+                        // finished at the same tick). Each dFoundDepositVO's
+                        // `extraDeposits_vector` holds bonus deposits the same
+                        // geologist uncovered — flattened into `deposits[]`.
+                        // No explorer counterpart observed yet; when captured
+                        // it'll add a second branch here.
+                        if (sr.type === 1004) {
+                            var tick = sr.data && sr.data.data;
+                            var tickList = unwrapCollection(tick);
+                            var completedItems = [];
+                            for (var ci = 0; ci < tickList.length; ci++) {
+                                var cmd = tickList[ci];
+                                if (!cmd || cmd.mode !== 160) continue;
+                                var found = cmd.data;
+                                if (!found || !found.__class ||
+                                    found.__class.indexOf('dFoundDepositVO') < 0) continue;
+                                var item = foundDepositToItem(found);
+                                if (item) completedItems.push(item);
+                            }
+                            if (completedItems.length > 0) {
+                                window._tsoSend('SPECIALIST_TASK_COMPLETED', { items: completedItems });
+                                webkit.messageHandlers.logger.postMessage(
+                                    '[TaskComplete] geologist ×' + completedItems.length +
+                                    ' ' + completedItems.map(function(it) {
+                                        return it.uid + '→' + it.deposits.length +
+                                               ' ' + (it.searchedFor || '?');
+                                    }).join(', '));
+                            }
+                        }
+
                         // Own public trade slot tracker. sr.type=1062 is a
                         // snapshot of the player's own trade window
                         // (dGameTickCommandVO mode=1062 wrapping an
@@ -989,7 +1068,14 @@
                 // We need a non-null sentinel so the Swift skip-if-buffed
                 // filter (BuffDispatchCoordinator) fires; prefer name when
                 // present, fall back to buffID, then a generic marker.
+                //
+                // `applianceMode` is also captured — it's the duration-tier
+                // enum the server uses (self vs friend vs PFB-boosted). The
+                // BuffDurationLearner keys on (buffName, applianceMode) so
+                // the same buff's mode-specific durations don't average into
+                // each other.
                 var activeBuff = null;
+                var activeBuffApplianceMode = null;
                 var bBuffList = unwrapCollection(b.buffs);
                 for (var bbi = 0; bbi < bBuffList.length; bbi++) {
                     var bf0 = bBuffList[bbi];
@@ -1001,17 +1087,153 @@
                     } else {
                         activeBuff = '<active>';
                     }
+                    if (typeof bf0.applianceMode === 'number') {
+                        activeBuffApplianceMode = bf0.applianceMode;
+                    }
                     break;
                 }
+                // Log the first sighting of each (buffName, applianceMode)
+                // pair per session so the user can seed the learner by
+                // applying buffs in-game without waiting for expiry: the
+                // pair shows up in `latest.log` within one zone-tick, and
+                // the duration follows later when the learner finishes
+                // observing. Gated by a sticky Set so the loop doesn't
+                // flood on every heartbeat.
+                if (activeBuff && activeBuffApplianceMode !== null) {
+                    var seenKey = activeBuff + '|' + activeBuffApplianceMode;
+                    if (!window._tsoSeenBuffModes) window._tsoSeenBuffModes = {};
+                    if (!window._tsoSeenBuffModes[seenKey]) {
+                        window._tsoSeenBuffModes[seenKey] = true;
+                        webkit.messageHandlers.logger.postMessage(
+                            '[Buff:mode-first-seen] buff=' + activeBuff +
+                            ' applianceMode=' + activeBuffApplianceMode +
+                            ' grid=' + bGrid + ' skin=' + bSkin);
+                    }
+                }
+                // Per-grid appliance delta: log whenever a grid's active
+                // buff newly appears or changes to a different buffID. The
+                // sticky mode-first-seen Set above only fires once per
+                // (buffID, mode) pair session-wide, so seeding by applying
+                // the *same* buff to multiple buildings never surfaces past
+                // the first. This delta tracker fires per building
+                // transition instead, enabling the "user narrates the
+                // sequence, we pin each buffID to the named buff" workflow.
+                //
+                // Mid-session buff applications don't reach this code path —
+                // BUILDINGS is only emitted on full zone-loads, not
+                // incremental updates. To seed buffs the user applies in
+                // the game, reload the zone (visit a friend and come back)
+                // so the server resends `allBuildings` with the new
+                // appliances.
+                //
+                // Only operate on the home zone — friend/adventure zones
+                // are not places the user applies seeding buffs, and
+                // mixing their grids into the delta map would flood the
+                // log on every visit. The map is reset on any non-home
+                // scan so the next home re-entry re-primes.
+                if (window._tsoZoneContext === 'home') {
+                    if (!window._tsoBuffDelta) {
+                        window._tsoBuffDelta = { primed: false, map: {} };
+                    }
+                    var delta = window._tsoBuffDelta;
+                    var lastKey = delta.map[bGrid];
+                    var curKey = activeBuff
+                        ? activeBuff + '|' + (activeBuffApplianceMode === null ? '?' : activeBuffApplianceMode)
+                        : null;
+                    if (delta.primed && curKey !== lastKey) {
+                        if (curKey) {
+                            webkit.messageHandlers.logger.postMessage(
+                                '[Buff:applied] grid=' + bGrid +
+                                ' buff=' + activeBuff +
+                                ' applianceMode=' + (activeBuffApplianceMode === null ? '?' : activeBuffApplianceMode) +
+                                ' skin=' + bSkin +
+                                (lastKey ? ' (was ' + lastKey + ')' : ''));
+                        } else if (lastKey) {
+                            webkit.messageHandlers.logger.postMessage(
+                                '[Buff:cleared] grid=' + bGrid +
+                                ' was=' + lastKey +
+                                ' skin=' + bSkin);
+                        }
+                    }
+                    delta.map[bGrid] = curKey;
+                }
                 loggedExemplar = true;
+                // `isProductionActive` is the in-game "pause production" flag:
+                // true = running, false = user has paused. Discovered 2026-11-21
+                // via window._tsoScanBuildings (bridge.js) — only boolean field
+                // whose value split the Woodcutter group N-1 vs 1 after one was
+                // paused. Uniform across unpaused populations, so the scan
+                // helper filtered it out for Masons (all active).
+                var bPaused = (typeof b.isProductionActive === 'boolean')
+                    ? !b.isProductionActive
+                    : false;
                 buildingItems.push({
                     gridIndex:  bGrid,
                     skin:       bSkin,
                     uid1:       (bUid && typeof bUid.uniqueID1 === 'number') ? bUid.uniqueID1 : 0,
                     uid2:       (bUid && typeof bUid.uniqueID2 === 'number') ? bUid.uniqueID2 : 0,
                     activeBuff: activeBuff,
+                    activeBuffApplianceMode: activeBuffApplianceMode,
+                    paused:     bPaused,
                 });
             }
+            // After the full home scan completes, mark the delta map as
+            // primed so the NEXT home scan emits [Buff:applied] diffs
+            // instead of a flood. Non-home scans don't touch the delta
+            // map — the user applies seeding buffs on home, visits a
+            // friend to trigger a reload, then returns home: the
+            // returning-home scan surfaces the diff against the
+            // pre-friend home snapshot.
+            if (window._tsoZoneContext === 'home' && window._tsoBuffDelta) {
+                window._tsoBuffDelta.primed = true;
+            }
+            // Snapshot every dBuildingVO's scalar fields keyed by grid so the
+            // `_tsoDumpBuilding` / `_tsoDiffBuildings` helpers in bridge.js can
+            // inspect them from Safari Web Inspector or by call-through. Full
+            // zone-loads only — incremental updates must not shrink the map.
+            // Also snapshots the first dBuffApplianceVO per building into
+            // _tsoLastAppliancesByGrid so we can inspect fields on the applied
+            // buff instance (expiry timestamp, duration, etc.) separately from
+            // the building's own scalar fields.
+            var gridSnapshotMap = {};
+            var applianceSnapshotMap = {};
+            for (var bk = 0; bk < ctx.allBuildings.length; bk++) {
+                var bRaw = ctx.allBuildings[bk];
+                var bRawGrid = detectPosition(bRaw);
+                if (bRawGrid < 0) continue;
+                var snap = {};
+                var bRawKeys = Object.keys(bRaw);
+                for (var bki = 0; bki < bRawKeys.length; bki++) {
+                    var kk = bRawKeys[bki];
+                    var vv = bRaw[kk];
+                    if (vv === null || vv === undefined) snap[kk] = null;
+                    else if (typeof vv === 'object') snap[kk] = '{cls:' + (vv.__class || '?') + '}';
+                    else snap[kk] = vv;
+                }
+                gridSnapshotMap[bRawGrid] = snap;
+
+                var appList = unwrapCollection(bRaw.buffs);
+                if (appList.length > 0 && appList[0]) {
+                    var ap = appList[0];
+                    var apSnap = {};
+                    var apKeys = Object.keys(ap);
+                    for (var api = 0; api < apKeys.length; api++) {
+                        var akn = apKeys[api];
+                        var akv = ap[akn];
+                        if (akv === null || akv === undefined) apSnap[akn] = null;
+                        else if (typeof akv === 'object') apSnap[akn] = '{cls:' + (akv.__class || '?') + '}';
+                        else apSnap[akn] = akv;
+                    }
+                    applianceSnapshotMap[bRawGrid] = apSnap;
+                }
+            }
+            window._tsoLastBuildingsByGrid = gridSnapshotMap;
+            window._tsoLastAppliancesByGrid = applianceSnapshotMap;
+            // Expose the per-response class inventory + one exemplar of each
+            // for discovery queries (`_tsoClassScan` / `_tsoDumpExemplar` in
+            // bridge.js). Overwritten on every full zone-load.
+            window._tsoLastClassCounts = ctx.classes;
+            window._tsoLastClassExemplars = ctx.exemplars;
             if (buildingItems.length > 0) {
                 window._tsoSend('BUILDINGS', { items: buildingItems });
                 // Strip trailing _NNN level suffix to group by base type, then log sorted summary.
@@ -1067,6 +1289,18 @@
                 }).join(', ');
                 window._tsoDiagLog(
                     '[AMF3:buffs] total=' + buffItems.length + ' | ' + buffSummary);
+                // Unconditional one-shot: surface the full raw-name roster
+                // once per session so unmapped buffs in `naming.json` /
+                // `buff-categories.json` can be spotted without turning on
+                // `_tsoDiag`. Gated on a sticky sentinel; keyed by the
+                // sorted name list so a new buff appearing later (acquired
+                // mid-session) also fires once.
+                var rosterKey = Object.keys(buffCounts).sort().join('|');
+                if (window._tsoBuffRosterKey !== rosterKey) {
+                    window._tsoBuffRosterKey = rosterKey;
+                    webkit.messageHandlers.logger.postMessage(
+                        '[BuffInventory] names=' + Object.keys(buffCounts).sort().join(', '));
+                }
             }
         }
 

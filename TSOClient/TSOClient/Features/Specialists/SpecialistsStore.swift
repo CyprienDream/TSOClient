@@ -90,6 +90,33 @@ final class SpecialistsStore {
         )
     }
 
+    // Optimistic flip to idle. Called from SpecialistTaskCompletedHandler
+    // when the server pushes `dGameTickCommandVO(mode=160, data=dFoundDepositVO)`
+    // — the authoritative geologist-finished signal. Mirrors markDispatched:
+    // clears task fields, invalidates the fingerprint so any subsequent
+    // wire snapshot that still shows the spec busy re-asserts truth.
+    func markCompleted(uid: String) {
+        guard let idx = items.firstIndex(where: { $0.id == uid }) else { return }
+        lastFingerprint = nil
+        let old = items[idx]
+        items[idx] = SpecialistItem(
+            id:             old.id,
+            uid1:           old.uid1,
+            uid2:           old.uid2,
+            specialistType: old.specialistType,
+            subTypeId:      old.subTypeId,
+            subTypeName:    old.subTypeName,
+            name:           old.name,
+            isIdle:         true,
+            skills:         old.skills,
+            collectedTime:  nil,
+            bonusTime:      nil,
+            taskEndTime:    nil,
+            taskActionType: nil,
+            taskSubTaskId:  nil
+        )
+    }
+
     func clear() {
         items = []
         lastFingerprint = nil

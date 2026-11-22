@@ -36,6 +36,7 @@
   { "displayName": "Butcher",                           "skinBases": ["Butcher"],                                "group": "Food" },
   { "displayName": "Improved Butcher",                  "skinBases": ["ImprovedButcher"],                        "group": "Food" },
   { "displayName": "Farm",                              "skinBases": ["Farm"],                                   "group": "Food" },
+  { "displayName": "Bio Farm",                          "skinBases": ["BioFarm"],                                   "group": "Food" },
   { "displayName": "Improved Farm",                     "skinBases": ["ImprovedFarm"],                           "group": "Food" },
   { "displayName": "Silo",                              "skinBases": ["silo"],                                   "group": "Food" },
   { "displayName": "Improved Silo",                     "skinBases": ["ImprovedSilo"],                           "group": "Food" },

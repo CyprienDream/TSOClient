@@ -230,3 +230,176 @@ struct SpecialistDisplayFormatterTests {
         #expect(f.compactDisplayName(forPayloadItem: named) == "Jack (Pirate Explorer)")
     }
 }
+
+@Suite("BuffDurationLearner")
+struct BuffDurationLearnerTests {
+
+    private func buildings(expired: Bool,
+                           uid: Int = 10,
+                           skin: String = "WoodCutter_01",
+                           mode: Int? = nil)
+        -> [BuildingsStore.BuildingItem] {
+        let store = BuildingsStore()
+        store.apply(.init(items: [
+            .init(gridIndex: uid, skin: skin, uid1: uid, uid2: 0,
+                  activeBuff: expired ? nil : "ProductivityBuffLvl3",
+                  activeBuffApplianceMode: expired ? nil : mode,
+                  paused: false)
+        ]))
+        return store.items
+    }
+
+    @Test func learnsDurationFromDispatchToExpiry() {
+        let kv = MockKeyValueStore()
+        let learner = BuffDurationLearner(defaults: kv, logger: MockLogger())
+        learner.recordDispatch(uidKey: "10:0", buffName: "ProductivityBuffLvl3",
+                               at: Date(timeIntervalSince1970: 0))
+        learner.observe(buildings: buildings(expired: false),
+                        now: Date(timeIntervalSince1970: 100))
+        #expect(learner.learnedDuration(for: "ProductivityBuffLvl3",
+                                        applianceMode: nil) == nil)
+
+        learner.observe(buildings: buildings(expired: true),
+                        now: Date(timeIntervalSince1970: 300))
+        #expect(learner.learnedDuration(for: "ProductivityBuffLvl3",
+                                        applianceMode: nil) == 300)
+    }
+
+    @Test func keepsMaxAcrossObservations() {
+        // Later samples that are shorter must not shrink the learned value —
+        // firing too early would waste buff stacks. Taking the max biases us
+        // toward firing slightly late, which the zone-load sweep still covers.
+        let kv = MockKeyValueStore()
+        let learner = BuffDurationLearner(defaults: kv, logger: MockLogger())
+        learner.recordDispatch(uidKey: "10:0", buffName: "Lvl3",
+                               at: Date(timeIntervalSince1970: 0))
+        learner.observe(buildings: buildings(expired: true),
+                        now: Date(timeIntervalSince1970: 500))
+        #expect(learner.learnedDuration(for: "Lvl3", applianceMode: nil) == 500)
+
+        learner.recordDispatch(uidKey: "10:0", buffName: "Lvl3",
+                               at: Date(timeIntervalSince1970: 1000))
+        learner.observe(buildings: buildings(expired: true),
+                        now: Date(timeIntervalSince1970: 1300))
+        #expect(learner.learnedDuration(for: "Lvl3", applianceMode: nil) == 500)
+    }
+
+    @Test func rejectsOutOfRangeSamples() {
+        let kv = MockKeyValueStore()
+        let learner = BuffDurationLearner(defaults: kv, logger: MockLogger())
+        learner.recordDispatch(uidKey: "10:0", buffName: "Lvl3",
+                               at: Date(timeIntervalSince1970: 0))
+        learner.observe(buildings: buildings(expired: true),
+                        now: Date(timeIntervalSince1970: 5))
+        #expect(learner.learnedDuration(for: "Lvl3", applianceMode: nil) == nil)
+
+        learner.recordDispatch(uidKey: "11:0", buffName: "Lvl300",
+                               at: Date(timeIntervalSince1970: 0))
+        learner.observe(buildings: buildings(expired: true, uid: 11),
+                        now: Date(timeIntervalSince1970: 400 * 3600))
+        #expect(learner.learnedDuration(for: "Lvl300", applianceMode: nil) == nil)
+    }
+
+    @Test func missingBuildingClearsTrackingWithoutLearning() {
+        let kv = MockKeyValueStore()
+        let learner = BuffDurationLearner(defaults: kv, logger: MockLogger())
+        learner.recordDispatch(uidKey: "10:0", buffName: "Lvl3",
+                               at: Date(timeIntervalSince1970: 0))
+        learner.observe(buildings: [], now: Date(timeIntervalSince1970: 300))
+        #expect(learner.learnedDuration(for: "Lvl3", applianceMode: nil) == nil)
+    }
+
+    @Test func persistsAcrossInstances() {
+        let kv = MockKeyValueStore()
+        let first = BuffDurationLearner(defaults: kv, logger: MockLogger())
+        first.recordDispatch(uidKey: "10:0", buffName: "Lvl3",
+                             at: Date(timeIntervalSince1970: 0))
+        first.observe(buildings: buildings(expired: true),
+                      now: Date(timeIntervalSince1970: 400))
+        #expect(first.learnedDuration(for: "Lvl3", applianceMode: nil) == 400)
+
+        let second = BuffDurationLearner(defaults: kv, logger: MockLogger())
+        #expect(second.learnedDuration(for: "Lvl3", applianceMode: nil) == 400)
+    }
+
+    // --- mode-keyed learning ---------------------------------------------
+    // The same buff gets different durations server-side depending on the
+    // applianceMode the server assigns (self vs friend vs PFB-boosted). The
+    // learner must bucket samples by mode so e.g. a 12h friend-applied
+    // duration doesn't average with a 24h self-applied duration.
+
+    @Test func latchesModeFromInterimObservation() {
+        // Observing the building while it's still buffed captures the mode;
+        // the subsequent expiry records against (name, mode) not (name, *).
+        let kv = MockKeyValueStore()
+        let learner = BuffDurationLearner(defaults: kv, logger: MockLogger())
+        learner.recordDispatch(uidKey: "10:0", buffName: "Lvl3",
+                               at: Date(timeIntervalSince1970: 0))
+        // Interim: buff still active, mode visible
+        learner.observe(buildings: buildings(expired: false, mode: 1),
+                        now: Date(timeIntervalSince1970: 100))
+        // Expiry
+        learner.observe(buildings: buildings(expired: true),
+                        now: Date(timeIntervalSince1970: 500))
+
+        #expect(learner.learnedDuration(for: "Lvl3", applianceMode: 1) == 500)
+        // Mode-specific lookup for a different mode falls through to the
+        // max across known modes (still 500 in this one-mode case).
+        #expect(learner.learnedDuration(for: "Lvl3", applianceMode: 9) == 500)
+    }
+
+    @Test func modesAreBucketedSeparately() {
+        let kv = MockKeyValueStore()
+        let learner = BuffDurationLearner(defaults: kv, logger: MockLogger())
+
+        // Mode 0: 600 seconds
+        learner.recordDispatch(uidKey: "10:0", buffName: "Lvl3",
+                               at: Date(timeIntervalSince1970: 0))
+        learner.observe(buildings: buildings(expired: false, mode: 0),
+                        now: Date(timeIntervalSince1970: 60))
+        learner.observe(buildings: buildings(expired: true),
+                        now: Date(timeIntervalSince1970: 600))
+
+        // Mode 1: 300 seconds (shorter — friend-applied, say)
+        learner.recordDispatch(uidKey: "10:0", buffName: "Lvl3",
+                               at: Date(timeIntervalSince1970: 1000))
+        learner.observe(buildings: buildings(expired: false, mode: 1),
+                        now: Date(timeIntervalSince1970: 1060))
+        learner.observe(buildings: buildings(expired: true),
+                        now: Date(timeIntervalSince1970: 1300))
+
+        #expect(learner.learnedDuration(for: "Lvl3", applianceMode: 0) == 600)
+        #expect(learner.learnedDuration(for: "Lvl3", applianceMode: 1) == 300)
+        // Unknown mode → max across buckets (600).
+        #expect(learner.learnedDuration(for: "Lvl3", applianceMode: nil) == 600)
+    }
+
+    @Test func missingModeFallsIntoAnyModeBucket() {
+        // No interim observation → mode never latched → learn goes to `|*`.
+        let kv = MockKeyValueStore()
+        let learner = BuffDurationLearner(defaults: kv, logger: MockLogger())
+        learner.recordDispatch(uidKey: "10:0", buffName: "Lvl3",
+                               at: Date(timeIntervalSince1970: 0))
+        learner.observe(buildings: buildings(expired: true),
+                        now: Date(timeIntervalSince1970: 400))
+
+        // Mode-specific lookup misses and cascades to any-mode (400).
+        #expect(learner.learnedDuration(for: "Lvl3", applianceMode: 0) == 400)
+        #expect(learner.learnedDuration(for: "Lvl3", applianceMode: nil) == 400)
+    }
+
+    @Test func legacyKeyIsMigratedIntoAnyModeBucket() {
+        // Simulate a pre-v2 persistence snapshot — v1 stored at
+        // "buffs.learnedDurations". The learner must surface those values
+        // via the any-mode fallback on first instantiation.
+        let kv = MockKeyValueStore()
+        kv.set(["Lvl3": TimeInterval(1200), "Lvl10": TimeInterval(3600)],
+               forKey: "buffs.learnedDurations")
+        let learner = BuffDurationLearner(defaults: kv, logger: MockLogger())
+
+        #expect(learner.learnedDuration(for: "Lvl3",  applianceMode: nil) == 1200)
+        #expect(learner.learnedDuration(for: "Lvl10", applianceMode: nil) == 3600)
+        // Mode-specific lookup also cascades through the any-mode bucket.
+        #expect(learner.learnedDuration(for: "Lvl3",  applianceMode: 0)   == 1200)
+    }
+}

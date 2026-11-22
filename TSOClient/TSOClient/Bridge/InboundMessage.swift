@@ -42,6 +42,45 @@ enum InboundMessage {
             let uid1: Int
             let uid2: Int
             let activeBuff: String? // buffName_string of the first active buff, if any
+            // dBuffApplianceVO.applianceMode of the active buff (nil when no
+            // buff or the field was absent). Duration-tier enum the server
+            // uses — the duration learner keys on (buffName, applianceMode)
+            // so e.g. a self-applied buff's duration doesn't average with a
+            // friend-applied one.
+            let activeBuffApplianceMode: Int?
+            // True when the player has paused production on this building.
+            // Buff dispatch skips paused buildings — buffing one would still
+            // decrement the stack but produce no output. Decoded as absent→false
+            // so a stale JS build (no `paused` key) still decodes cleanly.
+            let paused: Bool
+
+            private enum CodingKeys: String, CodingKey {
+                case gridIndex, skin, uid1, uid2, activeBuff, activeBuffApplianceMode, paused
+            }
+
+            init(from decoder: Decoder) throws {
+                let c = try decoder.container(keyedBy: CodingKeys.self)
+                self.gridIndex  = try c.decode(Int.self, forKey: .gridIndex)
+                self.skin       = try c.decode(String.self, forKey: .skin)
+                self.uid1       = try c.decode(Int.self, forKey: .uid1)
+                self.uid2       = try c.decode(Int.self, forKey: .uid2)
+                self.activeBuff = try c.decodeIfPresent(String.self, forKey: .activeBuff)
+                self.activeBuffApplianceMode = try c.decodeIfPresent(Int.self, forKey: .activeBuffApplianceMode)
+                self.paused     = (try c.decodeIfPresent(Bool.self, forKey: .paused)) ?? false
+            }
+
+            // Preserves memberwise construction for tests.
+            init(gridIndex: Int, skin: String, uid1: Int, uid2: Int,
+                 activeBuff: String?, activeBuffApplianceMode: Int? = nil,
+                 paused: Bool = false) {
+                self.gridIndex = gridIndex
+                self.skin = skin
+                self.uid1 = uid1
+                self.uid2 = uid2
+                self.activeBuff = activeBuff
+                self.activeBuffApplianceMode = activeBuffApplianceMode
+                self.paused = paused
+            }
         }
     }
 
@@ -98,6 +137,30 @@ enum InboundMessage {
             let username: String
             let level: Int
             let online: Bool
+        }
+    }
+
+    // Emitted by amf3-scanner when a `dGameTickCommandVO(mode=160,
+    // data=dFoundDepositVO)` proactive push arrives — the server-authoritative
+    // "geologist finished their task" event. One payload can carry multiple
+    // items (several geologists finishing on the same tick).
+    struct SpecialistTaskCompletedPayload: Decodable {
+        let items: [Item]
+
+        struct Item: Decodable {
+            let uid: String
+            let uid1: Int
+            let uid2: Int
+            let kind: String           // "geologist" (only observed value; explorer TBD)
+            let searchedFor: String    // e.g. "IronOre" — the task target
+            let deposits: [Deposit]    // main + any bonus finds
+        }
+
+        struct Deposit: Decodable {
+            let gridIndex: Int
+            let resource: String       // e.g. "IronOre"
+            let amount: Int
+            let maxAmount: Int
         }
     }
 

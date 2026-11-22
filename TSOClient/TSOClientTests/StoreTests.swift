@@ -96,6 +96,58 @@ struct SpecialistsStoreTests {
         #expect(store.items[0].taskSubTaskId == nil)
     }
 
+    @Test func markCompletedFlipsIdleAndClearsTaskFields() {
+        let store = SpecialistsStore()
+        store.apply(.init(items: [specItem(uid: "27678:0", isIdle: false,
+                                           collectedTime: 12345,
+                                           taskActionType: 0, taskSubTaskId: 3)],
+                          playerLevel: nil))
+        #expect(store.items[0].isIdle == false)
+
+        store.markCompleted(uid: "27678:0")
+
+        let it = store.items[0]
+        #expect(it.isIdle == true)
+        #expect(it.taskActionType == nil)
+        #expect(it.taskSubTaskId == nil)
+        #expect(it.collectedTime == nil)
+        #expect(it.taskEndTime == nil)
+        #expect(it.bonusTime == nil)
+    }
+
+    @Test func markCompletedForUnknownUidIsNoOp() {
+        let store = SpecialistsStore()
+        store.apply(.init(items: [specItem(uid: "1:1", isIdle: false,
+                                           taskActionType: 0, taskSubTaskId: 3)],
+                          playerLevel: nil))
+        store.markCompleted(uid: "9:9")
+        #expect(store.items[0].isIdle == false)
+        #expect(store.items[0].taskSubTaskId == 3)
+    }
+
+    // Symmetric to markDispatched's fingerprint invalidation. If the next
+    // wire snapshot still shows the geologist busy (task VO not yet null on
+    // the server's next tick), we want to re-assert truth rather than
+    // short-circuit on a matching fingerprint.
+    @Test func markCompletedInvalidatesFingerprintSoReplayReassertsBusy() {
+        let store = SpecialistsStore()
+        let busy = InboundMessage.SpecialistsPayload(
+            items: [specItem(uid: "1:1", isIdle: false,
+                             collectedTime: 1000, taskActionType: 0, taskSubTaskId: 3)],
+            playerLevel: nil)
+        store.apply(busy)
+        #expect(store.items[0].isIdle == false)
+
+        store.markCompleted(uid: "1:1")
+        #expect(store.items[0].isIdle == true)
+
+        // Same wire payload — without invalidation, fingerprint match would
+        // keep the (now stale) optimistic idle flip.
+        store.apply(busy)
+        #expect(store.items[0].isIdle == false)
+        #expect(store.items[0].taskSubTaskId == 3)
+    }
+
     // Fingerprint covers task state — a transition from idle→busy on the same
     // uid must be observed even though uids+count are unchanged.
     @Test func taskStateChangeOnSameUidStillApplies() {
@@ -131,9 +183,11 @@ struct SpecialistsStoreTests {
 
 private func buildingItem(grid: Int, skin: String,
                           uid1: Int = 0, uid2: Int = 0,
-                          activeBuff: String? = nil)
+                          activeBuff: String? = nil,
+                          paused: Bool = false)
     -> InboundMessage.BuildingsPayload.Item {
-    .init(gridIndex: grid, skin: skin, uid1: uid1, uid2: uid2, activeBuff: activeBuff)
+    .init(gridIndex: grid, skin: skin, uid1: uid1, uid2: uid2,
+          activeBuff: activeBuff, paused: paused)
 }
 
 @Suite("BuildingsStore")
@@ -180,6 +234,35 @@ struct BuildingsStoreTests {
         store.clear()
         #expect(store.items.isEmpty)
         #expect(store.bySkinBase.isEmpty)
+    }
+
+    @Test func applyRoundTripsPausedFlag() {
+        let store = BuildingsStore()
+        store.apply(.init(items: [
+            buildingItem(grid: 10, skin: "Woodcutter_01", paused: true),
+            buildingItem(grid: 20, skin: "Woodcutter_01", paused: false),
+        ]))
+        let items = store.bySkinBase["Woodcutter"] ?? []
+        #expect(items.first { $0.gridIndex == 10 }?.paused == true)
+        #expect(items.first { $0.gridIndex == 20 }?.paused == false)
+    }
+
+    @Test func togglingPausedBustsFingerprint() {
+        // Re-applying the same list with a flipped `paused` must rebuild;
+        // otherwise the buff filter would see stale state.
+        let store = BuildingsStore()
+        store.apply(.init(items: [buildingItem(grid: 1, skin: "Mason_01", paused: false)]))
+        store.apply(.init(items: [buildingItem(grid: 1, skin: "Mason_01", paused: true)]))
+        #expect(store.items.first?.paused == true)
+    }
+
+    @Test func decodingDefaultsPausedToFalseWhenKeyMissing() {
+        // Old JS builds (pre-paused rollout) won't emit the key. The decoder
+        // must accept the payload and default to false rather than throwing.
+        let json = #"{"items":[{"gridIndex":10,"skin":"Mason_01","uid1":10,"uid2":0,"activeBuff":null}]}"#
+        let payload = try! JSONDecoder()
+            .decode(InboundMessage.BuildingsPayload.self, from: json.data(using: .utf8)!)
+        #expect(payload.items[0].paused == false)
     }
 
     @Test func initLoadsPersistedSkinBases() {
