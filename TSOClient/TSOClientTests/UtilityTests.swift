@@ -121,3 +121,44 @@ struct BulkDispatcherTests {
         #expect(calls == 0)
     }
 }
+
+@Suite("TeeLogger")
+struct TeeLoggerTests {
+
+    @Test func broadcastsToEverySink() {
+        let a = MockLogger()
+        let b = MockLogger()
+        let tee = TeeLogger(loggers: [a, b])
+        tee.log("hello")
+        tee.log("world")
+        #expect(a.messages == ["hello", "world"])
+        #expect(b.messages == ["hello", "world"])
+    }
+
+    @Test func emptySinkListIsNoOp() {
+        let tee = TeeLogger(loggers: [])
+        tee.log("ignored")   // must not crash
+    }
+}
+
+@Suite("FileLogger")
+struct FileLoggerTests {
+    // Route test-host runs to a sidecar `tests.log` so running
+    // `xcodebuild test` doesn't clobber the live app's `latest.log`.
+
+    @Test func liveSessionPicksLatestLog() {
+        let env: [String: String] = [:]
+        #expect(FileLogger.defaultFilename(environment: env) == "latest.log")
+    }
+
+    @Test func testHostPicksTestsLog() {
+        let env = ["XCTestConfigurationFilePath": "/tmp/whatever.xctestconfiguration"]
+        #expect(FileLogger.defaultFilename(environment: env) == "tests.log")
+    }
+
+    @Test func liveAndTestsFilenamesAreDistinct() {
+        // Prevents the "live run writes to tests.log" regression if someone
+        // ever tries to simplify this to a single constant.
+        #expect(FileLogger.liveFilename != FileLogger.testsFilename)
+    }
+}
